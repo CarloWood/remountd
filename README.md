@@ -27,7 +27,7 @@ Typical use-case: allow scripts running inside a sandbox (e.g. bubblewrap with
   - The caller (via UNIX peer credentials).
   - The requested `<name>` against an allowlist in the config.
 - `remountd` performs a remount of the corresponding mount point:
-  - For bind mounts this is typically: `mount -o remount,bind,ro|rw <path>`
+  - Performs a: `mount -o remount,bind,ro|rw <path>`
   - Optionally inside a target mount namespace (e.g. using `nsenter -t <pid> -m`).
 
 ---
@@ -68,8 +68,6 @@ socket: /run/remountd.sock
 allow:
   codex:
     path: /opt/ext4/nvme2/codex
-    # Optional: enter the mount namespace of this PID before remounting.
-    # pid: 12345
 ```
 
 ---
@@ -84,7 +82,7 @@ Description=remountd control socket
 [Socket]
 ListenStream=/run/remountd.sock
 SocketUser=root
-SocketGroup=codex
+SocketGroup=mountd
 SocketMode=0660
 Accept=yes
 
@@ -129,7 +127,7 @@ sudo systemctl enable --now remountd.socket
 
 Then add allowed users to the socket group (example group `codex`):
 ```sh
-sudo usermod -aG codex <your-user>
+sudo usermod -aG mountd <your-user>
 ```
 
 Log out/in for group membership to take effect.

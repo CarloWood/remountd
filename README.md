@@ -5,8 +5,8 @@
 (`remountctl`) over a local UNIX socket.
 
 Typical use-case: allow scripts running inside a sandbox (e.g. bubblewrap with
-`--remount-ro` / `no_new_privs`) to temporarily enable write access to specific
-directories, without restarting the sandbox.
+`--remount-ro` / `no_new_privs`) to toggle write access to specific directories
+(e.g. to switch between a planning and execute mode), without restarting the sandbox.
 
 ---
 
@@ -39,9 +39,6 @@ directories, without restarting the sandbox.
 - The protocol is intentionally tiny and strict.
 - Only preconfigured targets are allowed.
 
-**You should treat `remountd` as privileged code**: keep the parser small, avoid
-“run arbitrary command” features, and prefer allowlists over patterns.
-
 ---
 
 ## Usage
@@ -50,10 +47,12 @@ directories, without restarting the sandbox.
 ```sh
 remountctl rw codex
 remountctl ro codex
+```
 
 ### List configured targets
 ```sh
 remountctl list
+```
 
 ---
 
@@ -71,6 +70,7 @@ allow:
     path: /opt/ext4/nvme2/codex
     # Optional: enter the mount namespace of this PID before remounting.
     # pid: 12345
+```
 
 ---
 
@@ -121,17 +121,21 @@ MemoryDenyWriteExecute=yes
 RestrictRealtime=yes
 SystemCallArchitectures=native
 ```
+
 Enable it:
 ```sh
 sudo systemctl enable --now remountd.socket
 ```
+
 Then add allowed users to the socket group (example group `codex`):
 ```sh
 sudo usermod -aG codex <your-user>
 ```
+
 Log out/in for group membership to take effect.
 
 ---
+
 
 ## License
 

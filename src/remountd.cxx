@@ -4,6 +4,7 @@
 #include <sys/stat.h>
 #include <sys/un.h>
 #include <unistd.h>
+#include <systemd/sd-daemon.h>
 
 #include <cerrno>
 #include <cstddef>
@@ -33,11 +34,34 @@ void PrintUsage(char const* argv0)
   std::cerr << "Usage: " << argv0 << " [--config <path>] [--socket <path>] [--inetd]\n";
 }
 
+constexpr size_t MAXARGLEN = 256;       // To allow passing a path as argument.
+
+bool sane_argument(char const* arg)
+{
+  // Paranoia.
+  if (!arg)
+    return false;
+
+  // If the length of the argument is larger or equal than MAXARGLEN characters, abort.
+  if (strnlen(arg, MAXARGLEN) == MAXARGLEN)
+    return false;
+
+  return true;
+}
+
 bool ParseLongOptionWithValue(int argc, char* argv[], int* index, std::string* value_out)
 {
-  if (*index + 1 >= argc) return false;
-  *value_out = argv[*index + 1];
-  *index += 1;
+  // Read the next argument, if any.
+  int const i = *index + 1;
+
+  if (i >= argc)
+    return false;
+
+  if (!sane_argument(argv[i]))
+    return false;
+
+  *value_out = argv[i];
+  *index = i;
   return true;
 }
 
@@ -45,17 +69,22 @@ bool ParseArgs(int argc, char* argv[], Options* options)
 {
   for (int i = 1; i < argc; ++i)
   {
+    if (!sane_argument(argv[i]))
+      return false;
+
     std::string_view const arg(argv[i]);
     if (arg == "--help" || arg == "-h")
     {
       PrintUsage(argv[0]);
       return false;
     }
+
     if (arg == "--inetd")
     {
       options->inetd_mode = true;
       continue;
     }
+
     if (arg == "--config")
     {
       std::string value;
@@ -82,6 +111,7 @@ bool ParseArgs(int argc, char* argv[], Options* options)
     std::cerr << "Unknown argument: " << arg << "\n";
     return false;
   }
+
   return true;
 }
 
@@ -108,18 +138,23 @@ std::optional<std::string> ParseSocketPathFromConfig(std::string const& config_p
   {
     std::string_view current(line);
     size_t const comment = current.find('#');
-    if (comment != std::string_view::npos) current = current.substr(0, comment);
+    if (comment != std::string_view::npos)
+      current = current.substr(0, comment);
     current = Trim(current);
-    if (current.empty()) continue;
+    if (current.empty())
+      continue;
 
     size_t const colon = current.find(':');
-    if (colon == std::string_view::npos) { continue; }
+    if (colon == std::string_view::npos)
+      continue;
 
     std::string_view const key = Trim(current.substr(0, colon));
-    if (key != "socket") continue;
+    if (key != "socket")
+      continue;
 
     std::string_view value = Trim(current.substr(colon + 1));
-    if (value.size() >= 2 && ((value.front() == '"' && value.back() == '"') || (value.front() == '\'' && value.back() == '\''))) value = value.substr(1, value.size() - 2);
+    if (value.size() >= 2 && ((value.front() == '"' && value.back() == '"') || (value.front() == '\'' && value.back() == '\'')))
+      value = value.substr(1, value.size() - 2);
 
     if (value.empty())
     {
@@ -142,7 +177,8 @@ void OnSignal(int /*signum*/)
 bool IsSocketFd(int fd)
 {
   struct stat st;
-  if (fstat(fd, &st) != 0) return false;
+  if (fstat(fd, &st) != 0)
+    return false;
 
   return S_ISSOCK(st.st_mode);
 }
@@ -163,22 +199,22 @@ struct SystemdSocketResult
 
 SystemdSocketResult DetectSystemdSocketActivation()
 {
-  char const* listen_fds_env = getenv("LISTEN_FDS");
+  char const* listen_fds_env = std::getenv("LISTEN_FDS");
   if (listen_fds_env == nullptr) { return {}; }
 
-  char const* listen_pid_env = getenv("LISTEN_PID");
+  char const* listen_pid_env = std::getenv("LISTEN_PID");
   if (listen_pid_env == nullptr) { return {SystemdSocketState::kError, -1, "LISTEN_FDS is set but LISTEN_PID is missing"}; }
 
   char* end             = nullptr;
-  long const listen_pid = strtol(listen_pid_env, &end, 10);
+  long const listen_pid = std::strtol(listen_pid_env, &end, 10);
   if (end == nullptr || *end != '\0' || listen_pid <= 0) { return {SystemdSocketState::kError, -1, "Invalid LISTEN_PID value"}; }
   if (static_cast<pid_t>(listen_pid) != getpid()) { return {}; }
 
   end                   = nullptr;
-  long const listen_fds = strtol(listen_fds_env, &end, 10);
+  long const listen_fds = std::strtol(listen_fds_env, &end, 10);
   if (end == nullptr || *end != '\0' || listen_fds < 1) { return {SystemdSocketState::kError, -1, "LISTEN_FDS must be >= 1 when LISTEN_PID matches"}; }
 
-  int const fd = 3;  // SD_LISTEN_FDS_START
+  int const fd = SD_LISTEN_FDS_START;
   if (!IsSocketFd(fd)) { return {SystemdSocketState::kError, -1, "Inherited FD 3 is not a socket"}; }
 
   return {SystemdSocketState::kListeningFd, fd, ""};
@@ -200,7 +236,7 @@ int CreateStandaloneListener(std::string const& socket_path, std::string* error_
       *error_out = "Path exists and is not a socket: '" + socket_path + "'";
       return -1;
     }
-    if (unlink(socket_path.c_str()) != 0)
+    if (std::remove(socket_path.c_str()) != 0)
     {
       *error_out = "Failed to remove stale socket '" + socket_path + "': " + strerror(errno);
       return -1;
@@ -221,7 +257,7 @@ int CreateStandaloneListener(std::string const& socket_path, std::string* error_
 
   sockaddr_un addr{};
   addr.sun_family = AF_UNIX;
-  strncpy(addr.sun_path, socket_path.c_str(), sizeof(addr.sun_path) - 1);
+  std::strncpy(addr.sun_path, socket_path.c_str(), sizeof(addr.sun_path) - 1);
 
   if (bind(fd, reinterpret_cast<sockaddr const*>(&addr), sizeof(addr)) != 0)
   {
@@ -249,7 +285,8 @@ void RunEventLoop()
 int main(int argc, char* argv[])
 {
   Options options;
-  if (!ParseArgs(argc, argv, &options)) { return 2; }
+  if (!ParseArgs(argc, argv, &options))
+    return 2;
 
   struct sigaction sa{};
   sa.sa_handler = OnSignal;
@@ -262,7 +299,7 @@ int main(int argc, char* argv[])
   {
     if (!IsSocketFd(STDIN_FILENO))
     {
-      std::cerr << "--inetd was specified but stdin is not a socket\n";
+      std::cerr << "remountd: --inetd was specified but stdin is not a socket\n";
       return 1;
     }
     std::cerr << "remountd skeleton running in --inetd mode (protocol handling not implemented yet)\n";
@@ -273,7 +310,7 @@ int main(int argc, char* argv[])
   SystemdSocketResult const systemd_socket = DetectSystemdSocketActivation();
   if (systemd_socket.state == SystemdSocketState::kError)
   {
-    std::cerr << "socket activation error: " << systemd_socket.error << "\n";
+    std::cerr << "remountd: socket activation error: " << systemd_socket.error << "\n";
     return 1;
   }
 
@@ -284,19 +321,20 @@ int main(int argc, char* argv[])
   if (systemd_socket.state == SystemdSocketState::kListeningFd)
   {
     listener_fd = systemd_socket.fd;
-    std::cerr << "remountd skeleton using systemd-activated listening socket on FD 3\n";
+    std::cerr << "remountd skeleton using systemd-activated listening socket on FD " << (SD_LISTEN_FDS_START) << "\n";
   }
   else
   {
     std::string socket_path;
-    if (options.socket_override.has_value()) { socket_path = *options.socket_override; }
+    if (options.socket_override.has_value())
+      socket_path = *options.socket_override;
     else
     {
       std::string error;
       std::optional<std::string> const parsed = ParseSocketPathFromConfig(options.config_path, &error);
       if (!parsed.has_value())
       {
-        std::cerr << error << "\n";
+        std::cerr << "remountd: " << error << "\n";
         return 1;
       }
       socket_path = *parsed;
@@ -306,7 +344,7 @@ int main(int argc, char* argv[])
     listener_fd = CreateStandaloneListener(socket_path, &error);
     if (listener_fd < 0)
     {
-      std::cerr << error << "\n";
+      std::cerr << "remountd: " << error << "\n";
       return 1;
     }
 
@@ -317,6 +355,9 @@ int main(int argc, char* argv[])
 
   RunEventLoop();
 
-  if (listener_fd >= 0 && listener_fd != STDIN_FILENO) { close(listener_fd); }
-  if (unlink_on_exit && !standalone_socket_path.empty()) { unlink(standalone_socket_path.c_str()); }
+  if (listener_fd >= 0 && listener_fd != STDIN_FILENO)
+    close(listener_fd);
+
+  if (unlink_on_exit && !standalone_socket_path.empty())
+    unlink(standalone_socket_path.c_str());
 }

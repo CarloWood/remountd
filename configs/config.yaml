@@ -1,0 +1,6 @@
+# /etc/remountd/config.yaml
+socket: /run/remountd.sock
+
+allow:
+  codex:
+    path: /opt/ext4/nvme2/codex/workspace   # The workspace that Codex works in.

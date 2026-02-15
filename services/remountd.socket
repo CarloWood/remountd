@@ -1,0 +1,13 @@
+[Unit]
+Description=remountd control socket
+
+[Socket]
+ListenStream=/run/remountd.sock
+SocketUser=root
+SocketGroup=mountd
+SocketMode=0660
+Accept=yes
+
+[Install]
+WantedBy=sockets.target
+

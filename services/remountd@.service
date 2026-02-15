@@ -1,0 +1,27 @@
+[Unit]
+Description=remountd request handler
+
+[Service]
+ExecStart=/usr/bin/remountd --inetd
+StandardInput=socket
+StandardOutput=socket
+StandardError=journal
+
+User=root
+Group=root
+NoNewPrivileges=yes
+CapabilityBoundingSet=CAP_SYS_ADMIN
+AmbientCapabilities=CAP_SYS_ADMIN
+
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RestrictRealtime=yes
+SystemCallArchitectures=native
+

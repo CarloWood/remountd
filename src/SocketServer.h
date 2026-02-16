@@ -8,6 +8,13 @@
 class SocketServer
 {
  public:
+  explicit SocketServer(Options const& options);
+  ~SocketServer();
+
+  SocketServer(SocketServer const&) = delete;
+  SocketServer& operator=(SocketServer const&) = delete;
+
+ public:
   enum class Mode
   {
     k_none,
@@ -26,20 +33,13 @@ class SocketServer
  private:
   void cleanup();
   bool is_socket_fd(int fd) const;
-  bool open_inetd(std::string* error_out);
-  bool open_systemd(std::string* error_out);
-  bool open_standalone(Options const& options, std::string* error_out);
-  bool create_standalone_listener(std::string const& socket_path, std::string* error_out);
+  void open_inetd();
+  bool open_systemd();
+  void open_standalone(Options const& options);
+  void create_standalone_listener(std::string const& socket_path);
+  void initialize(Options const& options);
 
  public:
-  SocketServer() = default;
-  ~SocketServer();
-
-  SocketServer(SocketServer const&) = delete;
-  SocketServer& operator=(SocketServer const&) = delete;
-
-  bool initialize(Options const& options, std::string* error_out);
-
   Mode mode() const { return mode_; }
   int listener_fd() const { return listener_fd_.get(); }
 };

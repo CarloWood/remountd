@@ -1,12 +1,15 @@
 #pragma once
 
-#include <string>
 #include <optional>
+#include <string>
 
 class Options
 {
  public:
   static constexpr char const* default_config_path_c = "/etc/remountd/config.yaml";
+
+ public:
+  Options(int argc, char* argv[]);
 
  private:
   std::string config_path_ = default_config_path_c;
@@ -14,11 +17,12 @@ class Options
   bool inetd_mode_ = false;
 
  private:
-  std::optional<std::string> parse_socket_path_from_config(std::string* error_out) const;
+  static void print_usage(char const* argv0);
+  void parse_args(int argc, char* argv[]);
+  std::string parse_socket_path_from_config() const;
 
  public:
-  bool parse_args(int argc, char* argv[]);
-  bool get_socket_path(std::string* socket_path_out) const;
+  std::string socket_path() const;
 
   // Accessors.
   std::string const& config_path() const { return config_path_; }

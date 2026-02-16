@@ -1,47 +1,39 @@
 #include "Options.h"
-#include <string_view>
-#include <iostream>
-#include <fstream>
+#include "remountd_error.h"
 
-constexpr std::size_t MAXARGLEN = 256;       // To allow passing a path as argument.
+#include <fstream>
+#include <iostream>
+#include <string_view>
+
+constexpr std::size_t max_argument_length = 256;
 
 namespace {
 
 bool sane_argument(char const* arg)
 {
-  // Paranoia.
   if (!arg)
     return false;
 
-  // If the length of the argument is larger or equal than MAXARGLEN characters, abort.
   std::size_t length = 0;
-  while (length < MAXARGLEN && arg[length] != '\0')
+  while (length < max_argument_length && arg[length] != '\0')
     ++length;
-  if (length == MAXARGLEN)
+  if (length == max_argument_length)
     return false;
 
   return true;
 }
 
-void print_usage(char const* argv0)
+std::string parse_long_option_with_value(int argc, char* argv[], int* index)
 {
-  std::cerr << "Usage: " << argv0 << " [--config <path>] [--socket <path>] [--inetd]\n";
-}
-
-bool parse_long_option_with_value(int argc, char* argv[], int* index, std::string* value_out)
-{
-  // Read the next argument, if any.
   int const i = *index + 1;
-
   if (i >= argc)
-    return false;
+    return {};
 
   if (!sane_argument(argv[i]))
-    return false;
+    return {};
 
-  *value_out = argv[i];
   *index = i;
-  return true;
+  return argv[i];
 }
 
 std::string_view trim(std::string_view in)
@@ -57,18 +49,34 @@ std::string_view trim(std::string_view in)
 
 } // namespace
 
-bool Options::parse_args(int argc, char* argv[])
+Options::Options(int argc, char* argv[])
 {
+  parse_args(argc, argv);
+}
+
+//static
+void Options::print_usage(char const* argv0)
+{
+  std::cerr << "Usage: " << argv0 << " [--config <path>] [--socket <path>] [--inetd]\n";
+}
+
+void Options::parse_args(int argc, char* argv[])
+{
+  using namespace remountd;
+
+  if (argc <= 0 || argv == nullptr || !sane_argument(argv[0]))
+    throw_error(errc::invalid_argument, "invalid process arguments");
+
   for (int i = 1; i < argc; ++i)
   {
     if (!sane_argument(argv[i]))
-      return false;
+      throw_error(errc::invalid_argument, "invalid argument at index " + std::to_string(i));
 
     std::string_view const arg(argv[i]);
     if (arg == "--help" || arg == "-h")
     {
-      print_usage(argv[0]);
-      return false;
+      Options::print_usage(argv[0]);
+      throw_error(errc::help_requested, "help requested");
     }
 
     if (arg == "--inetd")
@@ -79,42 +87,32 @@ bool Options::parse_args(int argc, char* argv[])
 
     if (arg == "--config")
     {
-      std::string value;
-      if (!parse_long_option_with_value(argc, argv, &i, &value))
-      {
-        std::cerr << "Missing value for --config\n";
-        return false;
-      }
+      std::string const value = parse_long_option_with_value(argc, argv, &i);
+      if (value.empty())
+        throw_error(errc::missing_option_value, "missing value for --config");
       config_path_ = std::move(value);
       continue;
     }
     if (arg == "--socket")
     {
-      std::string value;
-      if (!parse_long_option_with_value(argc, argv, &i, &value))
-      {
-        std::cerr << "Missing value for --socket\n";
-        return false;
-      }
+      std::string const value = parse_long_option_with_value(argc, argv, &i);
+      if (value.empty())
+        throw_error(errc::missing_option_value, "missing value for --socket");
       socket_override_ = std::move(value);
       continue;
     }
 
-    std::cerr << "Unknown argument: " << arg << "\n";
-    return false;
+    throw_error(errc::unknown_argument, "unknown argument: " + std::string(arg));
   }
-
-  return true;
 }
 
-std::optional<std::string> Options::parse_socket_path_from_config(std::string* error_out) const
+std::string Options::parse_socket_path_from_config() const
 {
+  using namespace remountd;
+
   std::ifstream config(config_path_);
   if (!config.is_open())
-  {
-    *error_out = "Unable to open config file '" + config_path_ + "'";
-    return std::nullopt;
-  }
+    throw_error(errc::config_open_failed, "unable to open config file '" + config_path_ + "'");
 
   std::string line;
   while (std::getline(config, line))
@@ -140,32 +138,18 @@ std::optional<std::string> Options::parse_socket_path_from_config(std::string* e
       value = value.substr(1, value.size() - 2);
 
     if (value.empty())
-    {
-      *error_out = "Config key 'socket' is empty in '" + config_path_ + "'";
-      return std::nullopt;
-    }
+      throw_error(errc::config_socket_empty, "config key 'socket' is empty in '" + config_path_ + "'");
 
-    return std::string(value);
+    return std::string{value};
   }
 
-  *error_out = "Config file '" + config_path_ + "' does not define a 'socket' key";
-  return std::nullopt;
+  throw_error(errc::config_socket_missing, "config file '" + config_path_ + "' does not define a 'socket' key");
 }
 
-bool Options::get_socket_path(std::string* socket_path_out) const
+std::string Options::socket_path() const
 {
   if (socket_override_.has_value())
-    *socket_path_out = *socket_override_;
-  else
-  {
-    std::string error;
-    std::optional<std::string> const parsed = parse_socket_path_from_config(&error);
-    if (!parsed.has_value())
-    {
-      std::cerr << "remountd: " << error << "\n";
-      return false;
-    }
-    *socket_path_out = *parsed;
-  }
-  return true;
+    return *socket_override_;
+
+  return parse_socket_path_from_config();
 }

@@ -1,11 +1,13 @@
 #include "Options.h"
 #include "SocketServer.h"
+#include "remountd_error.h"
 
 #include <signal.h>
 #include <unistd.h>
 
+#include <exception>
 #include <iostream>
-#include <string>
+#include <system_error>
 
 namespace {
 
@@ -36,22 +38,23 @@ void run_event_loop()
 
 int main(int argc, char* argv[])
 {
-  Options options;
-  if (!options.parse_args(argc, argv))
-    return 2;
-
-  install_signal_handlers();
-
-  SocketServer socket_server;
-  std::string error;
-  if (!socket_server.initialize(options, &error))
+  try
   {
-    if (!error.empty())
-      std::cerr << "remountd: " << error << "\n";
-    return 1;
+    Options const options(argc, argv);
+    install_signal_handlers();
+    SocketServer socket_server(options);
+    run_event_loop();
+    return 0;
   }
-
-  run_event_loop();
-
-  return 0;
+  catch (std::system_error const& error)
+  {
+    if (error.code() == remountd::errc::help_requested)
+      return 0;
+    std::cerr << "remountd: " << error.what() << "\n";
+  }
+  catch (std::exception const& error)
+  {
+    std::cerr << "remountd: " << error.what() << "\n";
+  }
+  return 1;
 }

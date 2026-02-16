@@ -63,7 +63,6 @@ void SocketServer::open_inetd()
   listener_fd_.reset(STDIN_FILENO);
   close_listener_on_cleanup_ = false;
   mode_ = Mode::k_inetd;
-  std::cerr << "remountd skeleton running in --inetd mode (protocol handling not implemented yet)\n";
 }
 
 bool SocketServer::open_systemd()
@@ -80,7 +79,7 @@ bool SocketServer::open_systemd()
 
   int const fd = k_systemd_listen_fd_start;
   if (!is_socket_fd(fd))
-    throw_error(errc::systemd_inherited_fd_not_socket, "inherited FD 3 is not a UNIX stream socket");
+    throw_error(errc::systemd_inherited_fd_not_socket, "inherited FD " + std::to_string(fd) + " is not a UNIX stream socket");
 
   listener_fd_.reset(fd);
   mode_ = Mode::k_systemd;
@@ -128,15 +127,15 @@ void SocketServer::create_standalone_listener(std::string const& socket_path)
 
   if (listen(fd.get(), k_listen_backlog) != 0)
   {
+    int const err = errno;
     std::filesystem::remove(socket_fs_path, ec);
-    throw std::system_error(errno, std::generic_category(), "listen('" + socket_native_path + "') failed");
+    throw std::system_error(err, std::generic_category(), "listen('" + socket_native_path + "') failed");
   }
 
   listener_fd_.reset(fd.release());
   unlink_on_cleanup_ = true;
   standalone_socket_path_ = socket_native_path;
   mode_ = Mode::k_standalone;
-  std::cerr << "remountd skeleton listening on " << standalone_socket_path_ << "\n";
 }
 
 void SocketServer::open_standalone(Application const& application)

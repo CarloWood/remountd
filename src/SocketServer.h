@@ -26,11 +26,11 @@ class SocketServer
   };
 
  private:
-  ScopedFd listener_fd_;
-  bool close_listener_on_cleanup_ = true;
-  bool unlink_on_cleanup_ = false;
-  std::string standalone_socket_path_;
-  Mode mode_ = Mode::k_none;
+  ScopedFd listener_fd_;                        // The listen socket; initialized by initialize().
+  Mode mode_ = Mode::k_none;                    // The mode that the SocketServer is running in.
+  bool close_listener_on_cleanup_ = true;       // Close listener_fd_ upon destruction (cleanup).
+  std::string standalone_socket_path_;          // Only valid if mode_ == Mode::k_standalone.
+  bool unlink_on_cleanup_ = false;              // Remove standalone_socket_path_ upon destruction (cleanup).
 
  private:
   void cleanup();

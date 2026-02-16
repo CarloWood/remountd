@@ -24,3 +24,10 @@ The only exceptions are accessors that simply return a member:
 ```
     int get() const { return fd_; }
 ```
+
+# Code Style
+
+* Do not remove comments.
+* Every member variable needs to be commented.
+* Most member functions need a comment to explain what they do / return etc.
+* Every class needs comments above it explaining what the class represents and expected usage.

@@ -107,7 +107,7 @@ bool Options::parse_args(int argc, char* argv[])
   return true;
 }
 
-std::optional<std::string> Options::parse_socket_path_from_config(std::string* error_out)
+std::optional<std::string> Options::parse_socket_path_from_config(std::string* error_out) const
 {
   std::ifstream config(config_path_);
   if (!config.is_open())
@@ -152,7 +152,7 @@ std::optional<std::string> Options::parse_socket_path_from_config(std::string* e
   return std::nullopt;
 }
 
-bool Options::get_socket_path(std::string* socket_path_out)
+bool Options::get_socket_path(std::string* socket_path_out) const
 {
   if (socket_override_.has_value())
     *socket_path_out = *socket_override_;

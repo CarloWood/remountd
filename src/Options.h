@@ -14,11 +14,11 @@ class Options
   bool inetd_mode_ = false;
 
  private:
-  std::optional<std::string> parse_socket_path_from_config(std::string* error_out);
+  std::optional<std::string> parse_socket_path_from_config(std::string* error_out) const;
 
  public:
   bool parse_args(int argc, char* argv[]);
-  bool get_socket_path(std::string* socket_path_out);
+  bool get_socket_path(std::string* socket_path_out) const;
 
   // Accessors.
   std::string const& config_path() const { return config_path_; }

@@ -1,3 +1,6 @@
+#include "Options.h"
+#include "ScopedFd.h"
+
 #include <fcntl.h>
 #include <signal.h>
 #include <sys/socket.h>
@@ -13,7 +16,6 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
-#include <optional>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -21,211 +23,9 @@
 
 namespace {
 
-constexpr char const* kDefaultConfigPath = "/etc/remountd/config.yaml";
 constexpr int kListenBacklog             = 32;
 volatile sig_atomic_t g_stop_requested   = 0;
 constexpr int kSystemdListenFdStart      = SD_LISTEN_FDS_START;
-
-class ScopedFd
-{
- public:
-  ScopedFd() = default;
-  explicit ScopedFd(int fd) : fd_(fd) { }
-
-  ScopedFd(ScopedFd&& other) noexcept : fd_(std::exchange(other.fd_, -1)) { }
-  ScopedFd& operator=(ScopedFd&& other) noexcept
-  {
-    if (this != &other)
-    {
-      reset();
-      fd_ = std::exchange(other.fd_, -1);
-    }
-    return *this;
-  }
-
-  ScopedFd(ScopedFd const&) = delete;
-  ScopedFd& operator=(ScopedFd const&) = delete;
-
-  ~ScopedFd()
-  {
-    reset();
-  }
-
-  bool valid() const
-  {
-    return fd_ >= 0;
-  }
-
-  int get() const
-  {
-    return fd_;
-  }
-
-  void reset(int fd = -1)
-  {
-    if (fd_ >= 0)
-      close(fd_);
-    fd_ = fd;
-  }
-
-  int release()
-  {
-    return std::exchange(fd_, -1);
-  }
-
- private:
-  int fd_ = -1;
-};
-
-struct Options
-{
-  std::string config_path = kDefaultConfigPath;
-  std::optional<std::string> socket_override;
-  bool inetd_mode = false;
-};
-
-void PrintUsage(char const* argv0)
-{
-  std::cerr << "Usage: " << argv0 << " [--config <path>] [--socket <path>] [--inetd]\n";
-}
-
-constexpr std::size_t MAXARGLEN = 256;       // To allow passing a path as argument.
-
-bool sane_argument(char const* arg)
-{
-  // Paranoia.
-  if (!arg)
-    return false;
-
-  // If the length of the argument is larger or equal than MAXARGLEN characters, abort.
-  std::size_t length = 0;
-  while (length < MAXARGLEN && arg[length] != '\0')
-    ++length;
-  if (length == MAXARGLEN)
-    return false;
-
-  return true;
-}
-
-bool ParseLongOptionWithValue(int argc, char* argv[], int* index, std::string* value_out)
-{
-  // Read the next argument, if any.
-  int const i = *index + 1;
-
-  if (i >= argc)
-    return false;
-
-  if (!sane_argument(argv[i]))
-    return false;
-
-  *value_out = argv[i];
-  *index = i;
-  return true;
-}
-
-bool ParseArgs(int argc, char* argv[], Options* options)
-{
-  for (int i = 1; i < argc; ++i)
-  {
-    if (!sane_argument(argv[i]))
-      return false;
-
-    std::string_view const arg(argv[i]);
-    if (arg == "--help" || arg == "-h")
-    {
-      PrintUsage(argv[0]);
-      return false;
-    }
-
-    if (arg == "--inetd")
-    {
-      options->inetd_mode = true;
-      continue;
-    }
-
-    if (arg == "--config")
-    {
-      std::string value;
-      if (!ParseLongOptionWithValue(argc, argv, &i, &value))
-      {
-        std::cerr << "Missing value for --config\n";
-        return false;
-      }
-      options->config_path = std::move(value);
-      continue;
-    }
-    if (arg == "--socket")
-    {
-      std::string value;
-      if (!ParseLongOptionWithValue(argc, argv, &i, &value))
-      {
-        std::cerr << "Missing value for --socket\n";
-        return false;
-      }
-      options->socket_override = std::move(value);
-      continue;
-    }
-
-    std::cerr << "Unknown argument: " << arg << "\n";
-    return false;
-  }
-
-  return true;
-}
-
-std::string_view Trim(std::string_view in)
-{
-  while (!in.empty() && (in.front() == ' ' || in.front() == '\t' || in.front() == '\r' || in.front() == '\n')) in.remove_prefix(1);
-
-  while (!in.empty() && (in.back() == ' ' || in.back() == '\t' || in.back() == '\r' || in.back() == '\n')) in.remove_suffix(1);
-
-  return in;
-}
-
-std::optional<std::string> ParseSocketPathFromConfig(std::string const& config_path, std::string* error_out)
-{
-  std::ifstream config(config_path);
-  if (!config.is_open())
-  {
-    *error_out = "Unable to open config file '" + config_path + "'";
-    return std::nullopt;
-  }
-
-  std::string line;
-  while (std::getline(config, line))
-  {
-    std::string_view current(line);
-    std::size_t const comment = current.find('#');
-    if (comment != std::string_view::npos)
-      current = current.substr(0, comment);
-    current = Trim(current);
-    if (current.empty())
-      continue;
-
-    std::size_t const colon = current.find(':');
-    if (colon == std::string_view::npos)
-      continue;
-
-    std::string_view const key = Trim(current.substr(0, colon));
-    if (key != "socket")
-      continue;
-
-    std::string_view value = Trim(current.substr(colon + 1));
-    if (value.size() >= 2 && ((value.front() == '"' && value.back() == '"') || (value.front() == '\'' && value.back() == '\'')))
-      value = value.substr(1, value.size() - 2);
-
-    if (value.empty())
-    {
-      *error_out = "Config key 'socket' is empty in '" + config_path + "'";
-      return std::nullopt;
-    }
-
-    return std::string(value);
-  }
-
-  *error_out = "Config file '" + config_path + "' does not define a 'socket' key";
-  return std::nullopt;
-}
 
 void OnSignal(int /*signum*/)
 {
@@ -349,7 +149,7 @@ void RunEventLoop()
 int main(int argc, char* argv[])
 {
   Options options;
-  if (!ParseArgs(argc, argv, &options))
+  if (!options.parse_args(argc, argv))
     return 2;
 
   struct sigaction sa{};
@@ -359,7 +159,7 @@ int main(int argc, char* argv[])
   sigaction(SIGINT, &sa, nullptr);
   sigaction(SIGTERM, &sa, nullptr);
 
-  if (options.inetd_mode)
+  if (options.inetd_mode())
   {
     if (!IsSocketFd(STDIN_FILENO))
     {
@@ -390,19 +190,9 @@ int main(int argc, char* argv[])
   else
   {
     std::string socket_path;
-    if (options.socket_override.has_value())
-      socket_path = *options.socket_override;
-    else
-    {
-      std::string error;
-      std::optional<std::string> const parsed = ParseSocketPathFromConfig(options.config_path, &error);
-      if (!parsed.has_value())
-      {
-        std::cerr << "remountd: " << error << "\n";
-        return 1;
-      }
-      socket_path = *parsed;
-    }
+
+    if (!options.get_socket_path(&socket_path))
+      return 1;
 
     std::string error;
     int const fd = CreateStandaloneListener(socket_path, &error);

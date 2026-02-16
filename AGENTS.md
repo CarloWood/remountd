@@ -11,3 +11,16 @@ For example,
       return foo_;
     }
 ```
+
+* All functions use snake\_case.
+* Put statements on their own line, without braces if it is a single statement.
+
+For example,
+```
+    if (boolean_expression)
+      new_statement();
+```
+The only exceptions are accessors that simply return a member:
+```
+    int get() const { return fd_; }
+```

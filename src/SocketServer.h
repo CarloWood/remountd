@@ -1,7 +1,8 @@
 #pragma once
 
-#include "Options.h"
+#include "Application.h"
 #include "ScopedFd.h"
+
 #include <string>
 
 namespace remountd {
@@ -9,7 +10,7 @@ namespace remountd {
 class SocketServer
 {
  public:
-  explicit SocketServer(Options const& options);
+  SocketServer(Application const& application, bool inetd_mode);
   ~SocketServer();
 
   SocketServer(SocketServer const&) = delete;
@@ -36,9 +37,9 @@ class SocketServer
   bool is_socket_fd(int fd) const;
   void open_inetd();
   bool open_systemd();
-  void open_standalone(Options const& options);
+  void open_standalone(Application const& application);
   void create_standalone_listener(std::string const& socket_path);
-  void initialize(Options const& options);
+  void initialize(Application const& application, bool inetd_mode);
 
  public:
   Mode mode() const { return mode_; }

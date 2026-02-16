@@ -21,9 +21,9 @@ constexpr int k_systemd_listen_fd_start = SD_LISTEN_FDS_START;
 
 namespace remountd {
 
-SocketServer::SocketServer(Options const& options)
+SocketServer::SocketServer(Application const& application, bool inetd_mode)
 {
-  initialize(options);
+  initialize(application, inetd_mode);
 }
 
 SocketServer::~SocketServer()
@@ -139,23 +139,23 @@ void SocketServer::create_standalone_listener(std::string const& socket_path)
   std::cerr << "remountd skeleton listening on " << standalone_socket_path_ << "\n";
 }
 
-void SocketServer::open_standalone(Options const& options)
+void SocketServer::open_standalone(Application const& application)
 {
-  create_standalone_listener(options.socket_path());
+  create_standalone_listener(application.socket_path());
 }
 
-void SocketServer::initialize(Options const& options)
+void SocketServer::initialize(Application const& application, bool inetd_mode)
 {
   cleanup();
 
-  if (options.inetd_mode())
+  if (inetd_mode)
   {
     open_inetd();
     return;
   }
 
   if (!open_systemd())
-    open_standalone(options);
+    open_standalone(application);
 }
 
 } // namespace remountd

@@ -1,87 +1,224 @@
 #include "Application.h"
+#include "remountd_error.h"
+
+#include <csignal>
+#include <fstream>
+#include <iostream>
+#include <unistd.h>
+
+namespace {
+
+constexpr std::size_t max_argument_length = 256;
+volatile sig_atomic_t g_stop_requested = 0;
+
+void handle_signal(int /*signum*/)
+{
+  g_stop_requested = 1;
+}
+
+bool sane_argument(char const* arg)
+{
+  if (!arg)
+    return false;
+
+  std::size_t length = 0;
+  while (length < max_argument_length && arg[length] != '\0')
+    ++length;
+  if (length == max_argument_length)
+    return false;
+
+  return true;
+}
+
+std::optional<std::string> parse_long_option_with_value(int argc, char* argv[], int* index)
+{
+  int const i = *index + 1;
+  if (i >= argc)
+    return std::nullopt;
+  if (!sane_argument(argv[i]))
+    return std::nullopt;
+
+  *index = i;
+  return argv[i];
+}
+
+std::string_view trim(std::string_view in)
+{
+  while (!in.empty() && (in.front() == ' ' || in.front() == '\t' || in.front() == '\r' || in.front() == '\n'))
+    in.remove_prefix(1);
+
+  while (!in.empty() && (in.back() == ' ' || in.back() == '\t' || in.back() == '\r' || in.back() == '\n'))
+    in.remove_suffix(1);
+
+  return in;
+}
+
+} // namespace
 
 namespace remountd {
 
-class ApplicationInfo
-{
- private:
-  std::u8string application_name_;
-  uint32_t encoded_version_;
+Application* Application::s_instance_ = nullptr;
 
- public:
-  void set_application_name(std::u8string const& application_name)
-  {
-    application_name_ = application_name;
-  }
-
-  void set_application_version(uint32_t encoded_version)
-  {
-    encoded_version_ = encoded_version;
-  }
-};
-
-//static
-Application* Application::s_instance;
-
-// Construct the base class of the Application object.
-//
-// Because this is a base class, virtual functions can't be used in the constructor.
-// Therefore initialization happens after construction.
 Application::Application()
 {
-  s_instance = this;
+  s_instance_ = this;
 }
 
-// This instantiates the destructor of our std::unique_ptr's.
-// Because it is here instead of the header we can use forward declarations for the types of certain member variables.
 Application::~Application()
 {
-  // Revoke global access.
-  s_instance = nullptr;
+  s_instance_ = nullptr;
+}
+
+void Application::print_usage(char const* argv0) const
+{
+  std::cerr << "Usage: " << argv0 << " [--help] [--config <path>] [--socket <path>]";
+  print_usage_extra(std::cerr);
+  std::cerr << "\n";
 }
 
 //virtual
+bool Application::parse_command_line_parameter(std::string_view /*arg*/, int /*argc*/, char*[] /*argv*/, int* /*index*/)
+{
+  return false;
+}
+
+//virtual
+void Application::print_usage_extra(std::ostream& /*os*/) const
+{
+}
+
 void Application::parse_command_line_parameters(int argc, char* argv[])
 {
+  if (argc <= 0 || argv == nullptr || !sane_argument(argv[0]))
+    throw_error(errc::invalid_argument, "invalid process arguments");
+
+  for (int i = 1; i < argc; ++i)
+  {
+    if (!sane_argument(argv[i]))
+      throw_error(errc::invalid_argument, "invalid argument at index " + std::to_string(i));
+
+    std::string_view const arg(argv[i]);
+    if (arg == "--help" || arg == "-h")
+    {
+      print_usage(argv[0]);
+      throw_error(errc::help_requested, "help requested");
+    }
+
+    if (arg == "--config")
+    {
+      std::optional<std::string> const value = parse_long_option_with_value(argc, argv, &i);
+      if (!value.has_value() || value->empty())
+        throw_error(errc::missing_option_value, "missing value for --config");
+      config_path_ = *value;
+      continue;
+    }
+
+    if (arg == "--socket")
+    {
+      std::optional<std::string> const value = parse_long_option_with_value(argc, argv, &i);
+      if (!value.has_value() || value->empty())
+        throw_error(errc::missing_option_value, "missing value for --socket");
+      socket_override_ = *value;
+      continue;
+    }
+
+    if (parse_command_line_parameter(arg, argc, argv, &i))
+      continue;
+
+    throw_error(errc::unknown_argument, "unknown argument: " + std::string(arg));
+  }
 }
 
-//virtual
-std::u8string Application::application_name() const
+std::string Application::parse_socket_path_from_config() const
 {
-  return u8"remountd";
+  std::ifstream config(config_path_);
+  if (!config.is_open())
+    throw_error(errc::config_open_failed, "unable to open config file '" + config_path_ + "'");
+
+  std::string line;
+  while (std::getline(config, line))
+  {
+    std::string_view current(line);
+    std::size_t const comment = current.find('#');
+    if (comment != std::string_view::npos)
+      current = current.substr(0, comment);
+    current = trim(current);
+    if (current.empty())
+      continue;
+
+    std::size_t const colon = current.find(':');
+    if (colon == std::string_view::npos)
+      continue;
+
+    std::string_view const key = trim(current.substr(0, colon));
+    if (key != "socket")
+      continue;
+
+    std::string_view value = trim(current.substr(colon + 1));
+    if (value.size() >= 2 && ((value.front() == '"' && value.back() == '"') || (value.front() == '\'' && value.back() == '\'')))
+      value = value.substr(1, value.size() - 2);
+
+    if (value.empty())
+      throw_error(errc::config_socket_empty, "config key 'socket' is empty in '" + config_path_ + "'");
+
+    return std::string(value);
+  }
+
+  throw_error(errc::config_socket_missing, "config file '" + config_path_ + "' does not define a 'socket' key");
+}
+
+void Application::install_signal_handlers() const
+{
+  struct sigaction sa{};
+  sa.sa_handler = handle_signal;
+  sigemptyset(&sa.sa_mask);
+  sa.sa_flags = 0;
+  sigaction(SIGINT, &sa, nullptr);
+  sigaction(SIGTERM, &sa, nullptr);
+}
+
+void Application::initialize(int argc, char** argv)
+{
+  if (initialized_)
+    throw_error(errc::application_already_initialized, "initialize called more than once");
+
+  if (argc > 0)
+    parse_command_line_parameters(argc, argv);
+
+  application_info_.set_application_name(application_name());
+  application_info_.set_application_version(application_version());
+
+  g_stop_requested = 0;
+  install_signal_handlers();
+  initialized_ = true;
+}
+
+void Application::run()
+{
+  if (!initialized_)
+    throw_error(errc::application_not_initialized, "run called before initialize");
+
+  while (!g_stop_requested)
+    pause();
+}
+
+void Application::quit()
+{
+  g_stop_requested = 1;
+}
+
+std::string Application::socket_path() const
+{
+  if (socket_override_.has_value())
+    return *socket_override_;
+
+  return parse_socket_path_from_config();
 }
 
 //virtual
 uint32_t Application::application_version() const
 {
-  return 0;     // Should be retrieved from CMakeLists.txt somehow. Use format MAJOR_VERSION * 100 + MINOR_VERSION.
-}
-
-// Finish initialization of a default constructed Application.
-void Application::initialize(int argc, char** argv)
-{
-  // Only call initialize once. Calling it twice leads to a nasty dead-lock that was hard to debug ;).
-  //ASSERT(!m_event_loop);
-
-  // Parse command line parameters before doing any initialization, so the command line arguments can influence the initialization too.
-
-  // Allow the user to override stuff.
-  if (argc > 0)
-    parse_command_line_parameters(argc, argv);
-
-  ApplicationInfo application_info;
-  application_info.set_application_name(application_name());
-  application_info.set_application_version(application_version());
-}
-
-void Application::quit()
-{
-}
-
-// Run the application.
-// This function does not return until the program terminated.
-void Application::run()
-{
+  return 0;
 }
 
 } // namespace remountd

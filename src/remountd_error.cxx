@@ -39,6 +39,10 @@ struct remountd_error_category final : std::error_category
         return "invalid systemd LISTEN_FDS count";
       case remountd::errc::systemd_inherited_fd_not_socket:
         return "inherited systemd file descriptor is not a UNIX stream socket";
+      case remountd::errc::application_already_initialized:
+        return "application is already initialized";
+      case remountd::errc::application_not_initialized:
+        return "application is not initialized";
       default:
         return "unknown remountd error " + std::to_string(error_value);
     }

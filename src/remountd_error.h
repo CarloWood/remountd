@@ -19,7 +19,9 @@ enum class errc
   socket_path_not_socket,
   inetd_stdin_not_socket,
   systemd_invalid_fd_count,
-  systemd_inherited_fd_not_socket
+  systemd_inherited_fd_not_socket,
+  application_already_initialized,
+  application_not_initialized
 };
 
 std::error_code make_error_code(errc code);

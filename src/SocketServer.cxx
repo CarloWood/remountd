@@ -19,6 +19,8 @@ constexpr int k_systemd_listen_fd_start = SD_LISTEN_FDS_START;
 
 } // namespace
 
+namespace remountd {
+
 SocketServer::SocketServer(Options const& options)
 {
   initialize(options);
@@ -56,7 +58,7 @@ bool SocketServer::is_socket_fd(int fd) const
 void SocketServer::open_inetd()
 {
   if (!is_socket_fd(STDIN_FILENO))
-    remountd::throw_error(remountd::errc::inetd_stdin_not_socket, "--inetd was specified but stdin is not a socket");
+    throw_error(errc::inetd_stdin_not_socket, "--inetd was specified but stdin is not a socket");
 
   listener_fd_.reset(STDIN_FILENO);
   close_listener_on_cleanup_ = false;
@@ -74,11 +76,11 @@ bool SocketServer::open_systemd()
     return false;
 
   if (listen_fds > 1)
-    remountd::throw_error(remountd::errc::systemd_invalid_fd_count, "expected exactly one socket from systemd");
+    throw_error(errc::systemd_invalid_fd_count, "expected exactly one socket from systemd");
 
   int const fd = k_systemd_listen_fd_start;
   if (!is_socket_fd(fd))
-    remountd::throw_error(remountd::errc::systemd_inherited_fd_not_socket, "inherited FD 3 is not a UNIX stream socket");
+    throw_error(errc::systemd_inherited_fd_not_socket, "inherited FD 3 is not a UNIX stream socket");
 
   listener_fd_.reset(fd);
   mode_ = Mode::k_systemd;
@@ -92,7 +94,7 @@ void SocketServer::create_standalone_listener(std::string const& socket_path)
   std::string const socket_native_path = socket_fs_path.string();
 
   if (socket_native_path.size() >= sizeof(sockaddr_un::sun_path))
-    remountd::throw_error(remountd::errc::socket_path_too_long, "socket path is too long for AF_UNIX: '" + socket_native_path + "'");
+    throw_error(errc::socket_path_too_long, "socket path is too long for AF_UNIX: '" + socket_native_path + "'");
 
   std::error_code ec;
   bool const exists = std::filesystem::exists(socket_fs_path, ec);
@@ -106,7 +108,7 @@ void SocketServer::create_standalone_listener(std::string const& socket_path)
       throw std::system_error(ec, "failed to inspect socket path '" + socket_native_path + "'");
 
     if (!is_socket)
-      remountd::throw_error(remountd::errc::socket_path_not_socket, "path exists and is not a socket: '" + socket_native_path + "'");
+      throw_error(errc::socket_path_not_socket, "path exists and is not a socket: '" + socket_native_path + "'");
 
     if (!std::filesystem::remove(socket_fs_path, ec) || ec)
       throw std::system_error(ec, "failed to remove stale socket '" + socket_native_path + "'");
@@ -155,3 +157,5 @@ void SocketServer::initialize(Options const& options)
   if (!open_systemd())
     open_standalone(options);
 }
+
+} // namespace remountd

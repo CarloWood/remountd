@@ -38,6 +38,8 @@ void run_event_loop()
 
 int main(int argc, char* argv[])
 {
+  using namespace remountd;
+
   try
   {
     Options const options(argc, argv);
@@ -48,7 +50,7 @@ int main(int argc, char* argv[])
   }
   catch (std::system_error const& error)
   {
-    if (error.code() == remountd::errc::help_requested)
+    if (error.code() == errc::help_requested)
       return 0;
     std::cerr << "remountd: " << error.what() << "\n";
   }

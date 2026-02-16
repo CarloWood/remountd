@@ -2,8 +2,9 @@
 
 #include "Options.h"
 #include "ScopedFd.h"
-
 #include <string>
+
+namespace remountd {
 
 class SocketServer
 {
@@ -43,3 +44,5 @@ class SocketServer
   Mode mode() const { return mode_; }
   int listener_fd() const { return listener_fd_.get(); }
 };
+
+} // namespace remountd

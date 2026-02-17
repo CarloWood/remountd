@@ -17,7 +17,7 @@ int main(int argc, char* argv[])
   }
   catch (std::system_error const& error)
   {
-    if (error.code() == errc::help_requested)
+    if (error.code() == errc::help_requested || error.code() == errc::version_requested)
       return 0;
     std::cerr << argv[0] << ": " << error.what() << "\n";
   }

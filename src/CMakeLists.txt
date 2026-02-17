@@ -1,6 +1,8 @@
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(LIBSYSTEMD REQUIRED IMPORTED_TARGET libsystemd)
 
+configure_file(version.h.in ${CMAKE_CURRENT_BINARY_DIR}/version.h @ONLY)
+
 add_executable(remountd
   Application.cxx
   Remountd.cxx
@@ -12,4 +14,10 @@ add_executable(remountd
 target_link_libraries(remountd
   PRIVATE
     PkgConfig::LIBSYSTEMD
+)
+
+target_include_directories(remountd
+  PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_BINARY_DIR}
 )

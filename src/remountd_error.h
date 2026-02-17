@@ -9,6 +9,7 @@ namespace remountd {
 enum class errc
 {
   help_requested = 1,
+  version_requested,
   invalid_argument,
   missing_option_value,
   unknown_argument,

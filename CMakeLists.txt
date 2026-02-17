@@ -1,8 +1,9 @@
 cmake_minimum_required(VERSION 3.16...4.2.3)
 
 project(remountd
-        LANGUAGES CXX
-        DESCRIPTION "Socket-activated daemon to remount preconfigured mount points ro/rw; controlled by an unprivileged client.")
+  VERSION 0.1
+  LANGUAGES CXX
+  DESCRIPTION "Socket-activated daemon to remount preconfigured mount points ro/rw; controlled by an unprivileged client.")
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)

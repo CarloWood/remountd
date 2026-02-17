@@ -1,5 +1,6 @@
 #include "Application.h"
 #include "remountd_error.h"
+#include "version.h"
 
 #include <fcntl.h>
 #include <fstream>
@@ -49,6 +50,11 @@ std::string_view trim(std::string_view in)
   return in;
 }
 
+std::string utf8_to_string(std::u8string const& text)
+{
+  return std::string(reinterpret_cast<char const*>(text.data()), text.size());
+}
+
 } // namespace
 
 namespace remountd {
@@ -73,9 +79,15 @@ Application::~Application()
 
 void Application::print_usage(char const* argv0) const
 {
-  std::cerr << "Usage: " << argv0 << " [--help] [--config <path>] [--socket <path>]";
+  std::cerr << "Usage: " << argv0 << " [--help] [--version] [--config <path>] [--socket <path>]";
   print_usage_extra(std::cerr);
   std::cerr << "\n";
+}
+
+void Application::print_version() const
+{
+  auto [major, minor] = application_info_.version();
+  std::cout << utf8_to_string(application_info_.application_name()) << ' ' << major << '.' << minor << "\n";
 }
 
 //virtual
@@ -104,6 +116,12 @@ void Application::parse_command_line_parameters(int argc, char* argv[])
     {
       print_usage(argv[0]);
       throw_error(errc::help_requested, "help requested");
+    }
+
+    if (arg == "--version")
+    {
+      print_version();
+      throw_error(errc::version_requested, "version requested");
     }
 
     if (arg == "--config")
@@ -225,13 +243,13 @@ void Application::initialize(int argc, char** argv)
   if (initialized_)
     throw_error(errc::application_already_initialized, "initialize called more than once");
 
+  // Initialize ApplicationInfo first so option handlers can use it.
+  application_info_.set_application_name(application_name());
+  application_info_.set_application_version(application_version());
+
   // Parse command line parameters, if any.
   if (argc > 0)
     parse_command_line_parameters(argc, argv);
-
-  // Initialize ApplicationInfo.
-  application_info_.set_application_name(application_name());
-  application_info_.set_application_version(application_version());
 
   // Set up signal handling.
   create_termination_pipe();
@@ -267,7 +285,8 @@ std::string Application::socket_path() const
 //virtual
 uint32_t Application::application_version() const
 {
-  return 0;
+  // From version.h.
+  return application_version_c;
 }
 
 } // namespace remountd

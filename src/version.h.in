@@ -1,0 +1,10 @@
+#pragma once
+
+#include "ApplicationInfo.h"
+#include <cstdint>
+
+namespace remountd {
+
+inline constexpr uint32_t application_version_c = ApplicationInfo::encode_version(@PROJECT_VERSION_MAJOR@, @PROJECT_VERSION_MINOR@);
+
+} // namespace remountd

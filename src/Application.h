@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ScopedFd.h"
+#include "ApplicationInfo.h"
 
 #include <cstdint>
 #include <iosfwd>
@@ -9,29 +10,6 @@
 #include <string_view>
 
 namespace remountd {
-
-// ApplicationInfo
-//
-// Stores high-level metadata for an application instance.
-class ApplicationInfo
-{
- private:
-  std::u8string application_name_;        // Human-readable application name.
-  uint32_t encoded_version_ = 0;          // Encoded application version.
-
- public:
-  // Set the application display name.
-  void set_application_name(std::u8string const& application_name)
-  {
-    application_name_ = application_name;
-  }
-
-  // Set the encoded application version.
-  void set_application_version(uint32_t encoded_version)
-  {
-    encoded_version_ = encoded_version;
-  }
-};
 
 // Application
 //
@@ -61,6 +39,9 @@ class Application
 
   // Print common usage text and derived-class usage suffix.
   void print_usage(char const* argv0) const;
+
+  // Print application name and decoded version.
+  void print_version() const;
 
   // Read and parse `socket:` from config_path_.
   std::string parse_socket_path_from_config() const;

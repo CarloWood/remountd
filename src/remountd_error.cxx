@@ -17,6 +17,8 @@ struct remountd_error_category final : std::error_category
     {
       case remountd::errc::help_requested:
         return "help requested";
+      case remountd::errc::version_requested:
+        return "version requested";
       case remountd::errc::invalid_argument:
         return "invalid argument";
       case remountd::errc::missing_option_value:

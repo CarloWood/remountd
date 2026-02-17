@@ -15,7 +15,7 @@
 
 namespace {
 
-constexpr int k_listen_backlog = 32;
+constexpr int k_listen_backlog = 4;
 constexpr int k_systemd_listen_fd_start = SD_LISTEN_FDS_START;
 
 } // namespace

@@ -1,7 +1,6 @@
 #include "Application.h"
 #include "remountd_error.h"
 
-#include <csignal>
 #include <fstream>
 #include <iostream>
 #include <unistd.h>
@@ -9,12 +8,6 @@
 namespace {
 
 constexpr std::size_t max_argument_length = 256;
-volatile sig_atomic_t g_stop_requested = 0;
-
-void handle_signal(int /*signum*/)
-{
-  g_stop_requested = 1;
-}
 
 bool sane_argument(char const* arg)
 {
@@ -61,11 +54,16 @@ Application* Application::s_instance_ = nullptr;
 
 Application::Application()
 {
+  // There is only one Application instance.
   s_instance_ = this;
 }
 
 Application::~Application()
 {
+  // Make sure Application::signal_handler is not called after Application was destructed.
+  if (initialized_)
+    uninstall_signal_handlers();
+  // Revoke all access to this instance.
   s_instance_ = nullptr;
 }
 
@@ -167,10 +165,22 @@ std::string Application::parse_socket_path_from_config() const
   throw_error(errc::config_socket_missing, "config file '" + config_path_ + "' does not define a 'socket' key");
 }
 
-void Application::install_signal_handlers() const
+//static
+void Application::install_signal_handlers()
 {
   struct sigaction sa{};
-  sa.sa_handler = handle_signal;
+  sa.sa_handler = &Application::signal_handler;
+  sigemptyset(&sa.sa_mask);
+  sa.sa_flags = 0;
+  sigaction(SIGINT, &sa, nullptr);
+  sigaction(SIGTERM, &sa, nullptr);
+}
+
+//static
+void Application::uninstall_signal_handlers()
+{
+  struct sigaction sa{};
+  sa.sa_handler = SIG_DFL;
   sigemptyset(&sa.sa_mask);
   sa.sa_flags = 0;
   sigaction(SIGINT, &sa, nullptr);
@@ -188,7 +198,7 @@ void Application::initialize(int argc, char** argv)
   application_info_.set_application_name(application_name());
   application_info_.set_application_version(application_version());
 
-  g_stop_requested = 0;
+  stop_requested_ = 0;
   install_signal_handlers();
   initialized_ = true;
 }
@@ -198,13 +208,13 @@ void Application::run()
   if (!initialized_)
     throw_error(errc::application_not_initialized, "run called before initialize");
 
-  while (!g_stop_requested)
+  while (!stop_requested_)
     pause();
 }
 
 void Application::quit()
 {
-  g_stop_requested = 1;
+  stop_requested_ = 1;
 }
 
 std::string Application::socket_path() const

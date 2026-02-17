@@ -1,5 +1,6 @@
 #pragma once
 
+#include <csignal>
 #include <cstdint>
 #include <iosfwd>
 #include <optional>
@@ -38,12 +39,19 @@ class Application
   std::string config_path_ = default_config_path_c;
   std::optional<std::string> socket_override_;
   bool initialized_ = false;
+  volatile sig_atomic_t stop_requested_ = 0;
 
  private:
   void parse_command_line_parameters(int argc, char* argv[]);
   void print_usage(char const* argv0) const;
   std::string parse_socket_path_from_config() const;
-  void install_signal_handlers() const;
+
+  static void install_signal_handlers();
+  static void uninstall_signal_handlers();
+  // signal_handler is only be called while `Application` is instantiated,
+  // because Application itself registers and unregisters the signal handler.
+  static void signal_handler(int signum) { s_instance_->handle_signal(signum); }
+  void handle_signal(int signnum) { stop_requested_ = 1; }
 
  protected:
   virtual bool parse_command_line_parameter(std::string_view arg, int argc, char* argv[], int* index);

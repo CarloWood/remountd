@@ -108,9 +108,6 @@ void SocketServer::create_standalone_listener(std::string const& socket_path)
 
     if (!is_socket)
       throw_error(errc::socket_path_not_socket, "path exists and is not a socket: '" + socket_native_path + "'");
-
-    if (!std::filesystem::remove(socket_fs_path, ec) || ec)
-      throw std::system_error(ec, "failed to remove stale socket '" + socket_native_path + "'");
   }
 
   ScopedFd fd(socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0));
@@ -123,7 +120,12 @@ void SocketServer::create_standalone_listener(std::string const& socket_path)
   addr.sun_path[socket_native_path.size()] = '\0';
 
   if (bind(fd.get(), reinterpret_cast<sockaddr const*>(&addr), sizeof(addr)) != 0)
-    throw std::system_error(errno, std::generic_category(), "bind('" + socket_native_path + "') failed");
+  {
+    int const bind_errno = errno;
+    if (bind_errno == EADDRINUSE)
+      throw std::system_error(bind_errno, std::generic_category(), "socket path already exists: '" + socket_native_path + "'");
+    throw std::system_error(bind_errno, std::generic_category(), "bind('" + socket_native_path + "') failed");
+  }
 
   if (listen(fd.get(), k_listen_backlog) != 0)
   {

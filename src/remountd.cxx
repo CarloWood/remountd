@@ -11,8 +11,7 @@ int main(int argc, char* argv[])
 
   try
   {
-    Remountd application;
-    application.initialize(argc, argv);
+    Remountd application(argc, argv);
     application.run();
     return 0;
   }
@@ -20,11 +19,11 @@ int main(int argc, char* argv[])
   {
     if (error.code() == errc::help_requested)
       return 0;
-    std::cerr << "remountd: " << error.what() << "\n";
+    std::cerr << argv[0] << ": " << error.what() << "\n";
   }
   catch (std::exception const& error)
   {
-    std::cerr << "remountd: " << error.what() << "\n";
+    std::cerr << argv[0] << ": " << error.what() << "\n";
   }
   return 1;
 }

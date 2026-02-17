@@ -1,8 +1,11 @@
 #include "Application.h"
 #include "remountd_error.h"
 
+#include <fcntl.h>
 #include <fstream>
 #include <iostream>
+#include <signal.h>
+#include <system_error>
 #include <unistd.h>
 
 namespace {
@@ -51,6 +54,7 @@ std::string_view trim(std::string_view in)
 namespace remountd {
 
 Application* Application::s_instance_ = nullptr;
+int Application::s_signal_write_fd_ = -1;
 
 Application::Application()
 {
@@ -61,8 +65,8 @@ Application::Application()
 Application::~Application()
 {
   // Make sure Application::signal_handler is not called after Application was destructed.
-  if (initialized_)
-    uninstall_signal_handlers();
+  s_signal_write_fd_ = -1;
+  uninstall_signal_handlers();
   // Revoke all access to this instance.
   s_instance_ = nullptr;
 }
@@ -165,6 +169,33 @@ std::string Application::parse_socket_path_from_config() const
   throw_error(errc::config_socket_missing, "config file '" + config_path_ + "' does not define a 'socket' key");
 }
 
+void Application::create_termination_pipe()
+{
+  int pipe_fds[2] = {-1, -1};
+  if (pipe2(pipe_fds, O_NONBLOCK | O_CLOEXEC) != 0)
+    throw std::system_error(errno, std::generic_category(), "pipe2 failed");
+
+  terminate_read_fd_.reset(pipe_fds[0]);
+  terminate_write_fd_.reset(pipe_fds[1]);
+}
+
+//static
+void Application::notify_termination_fd(int fd) noexcept
+{
+  if (fd < 0)
+    return;
+
+  unsigned char byte = 1;
+  ssize_t const ret = write(fd, &byte, 1);
+  (void)ret;
+}
+
+//static
+void Application::signal_handler(int /*signum*/)
+{
+  notify_termination_fd(s_signal_write_fd_);
+}
+
 //static
 void Application::install_signal_handlers()
 {
@@ -172,8 +203,10 @@ void Application::install_signal_handlers()
   sa.sa_handler = &Application::signal_handler;
   sigemptyset(&sa.sa_mask);
   sa.sa_flags = 0;
-  sigaction(SIGINT, &sa, nullptr);
-  sigaction(SIGTERM, &sa, nullptr);
+  if (sigaction(SIGINT, &sa, nullptr) != 0)
+    throw std::system_error(errno, std::generic_category(), "sigaction(SIGINT) failed");
+  if (sigaction(SIGTERM, &sa, nullptr) != 0)
+    throw std::system_error(errno, std::generic_category(), "sigaction(SIGTERM) failed");
 }
 
 //static
@@ -192,14 +225,20 @@ void Application::initialize(int argc, char** argv)
   if (initialized_)
     throw_error(errc::application_already_initialized, "initialize called more than once");
 
+  // Parse command line parameters, if any.
   if (argc > 0)
     parse_command_line_parameters(argc, argv);
 
+  // Initialize ApplicationInfo.
   application_info_.set_application_name(application_name());
   application_info_.set_application_version(application_version());
 
-  stop_requested_ = 0;
+  // Set up signal handling.
+  create_termination_pipe();
+  s_signal_write_fd_ = terminate_write_fd_.get();
   install_signal_handlers();
+
+  // Fully initialized.
   initialized_ = true;
 }
 
@@ -208,13 +247,13 @@ void Application::run()
   if (!initialized_)
     throw_error(errc::application_not_initialized, "run called before initialize");
 
-  while (!stop_requested_)
-    pause();
+  // Call mainloop of derived class.
+  mainloop();
 }
 
 void Application::quit()
 {
-  stop_requested_ = 1;
+  notify_termination_fd(terminate_write_fd_.get());
 }
 
 std::string Application::socket_path() const

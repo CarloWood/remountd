@@ -1,6 +1,7 @@
 #pragma once
 
-#include <csignal>
+#include "ScopedFd.h"
+
 #include <cstdint>
 #include <iosfwd>
 #include <optional>
@@ -9,24 +10,35 @@
 
 namespace remountd {
 
+// ApplicationInfo
+//
+// Stores high-level metadata for an application instance.
 class ApplicationInfo
 {
  private:
-  std::u8string application_name_;
-  uint32_t encoded_version_ = 0;
+  std::u8string application_name_;        // Human-readable application name.
+  uint32_t encoded_version_ = 0;          // Encoded application version.
 
  public:
+  // Set the application display name.
   void set_application_name(std::u8string const& application_name)
   {
     application_name_ = application_name;
   }
 
+  // Set the encoded application version.
   void set_application_version(uint32_t encoded_version)
   {
     encoded_version_ = encoded_version;
   }
 };
 
+// Application
+//
+// Base class that provides common command line parsing, signal handling,
+// termination signaling through a self-pipe, and a non-virtual run() driver.
+// Derived classes implement parse_command_line_parameter() for extra CLI options
+// and mainloop() for the main event loop.
 class Application
 {
  public:
@@ -34,43 +46,82 @@ class Application
   static Application& instance() { return *s_instance_; }
 
  private:
-  static Application* s_instance_;
-  ApplicationInfo application_info_;
-  std::string config_path_ = default_config_path_c;
-  std::optional<std::string> socket_override_;
-  bool initialized_ = false;
-  volatile sig_atomic_t stop_requested_ = 0;
+  static Application* s_instance_;                    // Singleton application instance for signal dispatch.
+  static int s_signal_write_fd_;                      // Write-end FD used directly by the async signal handler.
+  ApplicationInfo application_info_;                  // Metadata captured during initialize().
+  std::string config_path_ = default_config_path_c;   // Path of the YAML config file.
+  std::optional<std::string> socket_override_;        // Optional override for socket path from CLI.
+  bool initialized_ = false;                          // True after successful initialize().
+  ScopedFd terminate_read_fd_;                        // Read-end of termination self-pipe.
+  ScopedFd terminate_write_fd_;                       // Write-end of termination self-pipe.
 
  private:
+  // Parse common command line parameters and delegate unknown options to derived class.
   void parse_command_line_parameters(int argc, char* argv[]);
+
+  // Print common usage text and derived-class usage suffix.
   void print_usage(char const* argv0) const;
+
+  // Read and parse `socket:` from config_path_.
   std::string parse_socket_path_from_config() const;
 
+  // Create the self-pipe used to wake epoll/mainloop on termination.
+  void create_termination_pipe();
+
+  // Register process signal handlers.
   static void install_signal_handlers();
+
+  // Restore default process signal handlers.
   static void uninstall_signal_handlers();
-  // signal_handler is only be called while `Application` is instantiated,
-  // because Application itself registers and unregisters the signal handler.
-  static void signal_handler(int signum) { s_instance_->handle_signal(signum); }
-  void handle_signal(int signnum) { stop_requested_ = 1; }
+
+  // Async signal handler entrypoint; writes to s_signal_write_fd_.
+  static void signal_handler(int signum);
+
+  // Write a wakeup byte to a termination pipe FD.
+  static void notify_termination_fd(int fd) noexcept;
 
  protected:
+  // Parse a derived-class specific command line parameter.
   virtual bool parse_command_line_parameter(std::string_view arg, int argc, char* argv[], int* index);
+
+  // Print derived-class specific usage suffix.
   virtual void print_usage_extra(std::ostream& os) const;
 
+  // Return file descriptor that becomes readable when termination is requested.
+  int termination_fd() const { return terminate_read_fd_.get(); }
+
+  // Derived class event loop implementation.
+  virtual void mainloop() = 0;
+
  public:
+  // Construct a default, uninitialized application.
   Application();
+
+  // Unregister signal handlers and release application singleton.
   virtual ~Application();
 
+  // Parse CLI, initialize metadata, create termination pipe, and install signals.
   void initialize(int argc = 0, char** argv = nullptr);
+
+  // Run the application mainloop until it returns.
   void run();
+
+  // Request application termination by waking termination_fd().
   void quit();
 
+  // Resolve configured socket path from override or config file.
   std::string socket_path() const;
 
+  // Access configured config file path.
   std::string const& config_path() const { return config_path_; }
+
+  // Access configured socket path override.
   std::optional<std::string> const& socket_override() const { return socket_override_; }
 
+  // Return application display name.
   virtual std::u8string application_name() const = 0;
+
+  // Return encoded application version.
   virtual uint32_t application_version() const;
 };
 

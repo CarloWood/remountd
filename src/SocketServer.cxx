@@ -1,6 +1,8 @@
 #include "SocketServer.h"
+#include "Application.h"
 #include "remountd_error.h"
 
+#include <sys/epoll.h>
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <unistd.h>
@@ -9,7 +11,6 @@
 #include <algorithm>
 #include <cerrno>
 #include <filesystem>
-#include <iostream>
 #include <system_error>
 
 namespace {
@@ -21,9 +22,48 @@ constexpr int k_systemd_listen_fd_start = SD_LISTEN_FDS_START;
 
 namespace remountd {
 
-SocketServer::SocketServer(Application const& application, bool inetd_mode)
+// SocketServer::Client
+//
+// Represents a connected client socket and consumes readable data.
+class SocketServer::Client
 {
-  initialize(application, inetd_mode);
+ private:
+  ScopedFd fd_;                       // Owned connected client socket.
+
+ public:
+  // Take ownership of connected client file descriptor.
+  explicit Client(int fd) : fd_(fd) { }
+
+  // Return underlying client file descriptor.
+  int fd() const { return fd_.get(); }
+
+  // Read currently available data; return false when peer closed.
+  bool handle_readable()
+  {
+    char buffer[4096];
+    for (;;)
+    {
+      ssize_t const read_ret = read(fd_.get(), buffer, sizeof(buffer));
+      if (read_ret > 0)
+        continue;
+
+      if (read_ret == 0)
+        return false;
+
+      if (errno == EINTR)
+        continue;
+
+      if (errno == EAGAIN || errno == EWOULDBLOCK)
+        return true;
+
+      throw std::system_error(errno, std::generic_category(), "read(client_fd) failed");
+    }
+  }
+};
+
+SocketServer::SocketServer(bool inetd_mode)
+{
+  initialize(inetd_mode);
 }
 
 SocketServer::~SocketServer()
@@ -33,6 +73,8 @@ SocketServer::~SocketServer()
 
 void SocketServer::cleanup()
 {
+  clients_.clear();
+
   if (close_listener_on_cleanup_)
     listener_fd_.reset();
   else
@@ -83,7 +125,6 @@ bool SocketServer::open_systemd()
 
   listener_fd_.reset(fd);
   mode_ = Mode::k_systemd;
-  std::cerr << "remountd skeleton using systemd-activated listening socket on FD " << k_systemd_listen_fd_start << "\n";
   return true;
 }
 
@@ -140,12 +181,12 @@ void SocketServer::create_standalone_listener(std::string const& socket_path)
   mode_ = Mode::k_standalone;
 }
 
-void SocketServer::open_standalone(Application const& application)
+void SocketServer::open_standalone()
 {
-  create_standalone_listener(application.socket_path());
+  create_standalone_listener(Application::instance().socket_path());
 }
 
-void SocketServer::initialize(Application const& application, bool inetd_mode)
+void SocketServer::initialize(bool inetd_mode)
 {
   cleanup();
 
@@ -156,7 +197,158 @@ void SocketServer::initialize(Application const& application, bool inetd_mode)
   }
 
   if (!open_systemd())
-    open_standalone(application);
+    open_standalone();
+}
+
+void SocketServer::add_fd_to_epoll(int epoll_fd, int fd, uint32_t events)
+{
+  epoll_event event{};
+  event.events = events;
+  event.data.fd = fd;
+  if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, fd, &event) != 0)
+    throw std::system_error(errno, std::generic_category(), "epoll_ctl(ADD) failed");
+}
+
+void SocketServer::remove_fd_from_epoll(int epoll_fd, int fd)
+{
+  if (epoll_ctl(epoll_fd, EPOLL_CTL_DEL, fd, nullptr) == 0)
+    return;
+  if (errno == ENOENT || errno == EBADF)
+    return;
+  throw std::system_error(errno, std::generic_category(), "epoll_ctl(DEL) failed");
+}
+
+void SocketServer::add_client(int epoll_fd, int client_fd)
+{
+  std::unique_ptr<Client> client = std::make_unique<Client>(client_fd);
+  add_fd_to_epoll(epoll_fd, client->fd(), EPOLLIN | EPOLLRDHUP);
+  clients_.emplace(client->fd(), std::move(client));
+}
+
+void SocketServer::remove_client(int epoll_fd, int client_fd)
+{
+  auto const iter = clients_.find(client_fd);
+  if (iter == clients_.end())
+    return;
+
+  remove_fd_from_epoll(epoll_fd, client_fd);
+  clients_.erase(iter);
+}
+
+void SocketServer::accept_new_clients(int epoll_fd)
+{
+  for (;;)
+  {
+    int const client_fd = accept4(listener_fd_.get(), nullptr, nullptr, SOCK_NONBLOCK | SOCK_CLOEXEC);
+    if (client_fd >= 0)
+    {
+      add_client(epoll_fd, client_fd);
+      continue;
+    }
+
+    if (errno == EINTR)
+      continue;
+
+    if (errno == EAGAIN || errno == EWOULDBLOCK)
+      return;
+
+    throw std::system_error(errno, std::generic_category(), "accept4 failed");
+  }
+}
+
+void SocketServer::handle_client_readable(int epoll_fd, int client_fd)
+{
+  auto iter = clients_.find(client_fd);
+  if (iter == clients_.end())
+    return;
+
+  bool const keep_client = iter->second->handle_readable();
+  if (!keep_client)
+    remove_client(epoll_fd, client_fd);
+}
+
+void SocketServer::drain_termination_fd(int terminate_fd)
+{
+  char buffer[128];
+  for (;;)
+  {
+    ssize_t const read_ret = read(terminate_fd, buffer, sizeof(buffer));
+    if (read_ret > 0)
+      continue;
+
+    if (read_ret == 0)
+      return;
+
+    if (errno == EINTR)
+      continue;
+
+    if (errno == EAGAIN || errno == EWOULDBLOCK)
+      return;
+
+    throw std::system_error(errno, std::generic_category(), "read(terminate_fd) failed");
+  }
+}
+
+void SocketServer::mainloop(int terminate_fd)
+{
+  if (terminate_fd < 0)
+    throw std::system_error(EINVAL, std::generic_category(), "invalid terminate fd");
+
+  ScopedFd epoll_fd(epoll_create1(EPOLL_CLOEXEC));
+  if (!epoll_fd.valid())
+    throw std::system_error(errno, std::generic_category(), "epoll_create1 failed");
+
+  add_fd_to_epoll(epoll_fd.get(), terminate_fd, EPOLLIN);
+
+  if (mode_ == Mode::k_inetd)
+  {
+    int const client_fd = listener_fd_.release();
+    close_listener_on_cleanup_ = true;
+    add_client(epoll_fd.get(), client_fd);
+  }
+  else
+    add_fd_to_epoll(epoll_fd.get(), listener_fd_.get(), EPOLLIN);
+
+  epoll_event events[32];
+  for (;;)
+  {
+    int const event_count = epoll_wait(epoll_fd.get(), events, 32, -1);
+    if (event_count < 0)
+    {
+      if (errno == EINTR)
+        continue;
+      throw std::system_error(errno, std::generic_category(), "epoll_wait failed");
+    }
+
+    for (int i = 0; i < event_count; ++i)
+    {
+      int const fd = events[i].data.fd;
+      uint32_t const epoll_events = events[i].events;
+
+      if (fd == terminate_fd)
+      {
+        drain_termination_fd(terminate_fd);
+        return;
+      }
+
+      if (mode_ != Mode::k_inetd && fd == listener_fd_.get())
+      {
+        if ((epoll_events & EPOLLIN) != 0)
+          accept_new_clients(epoll_fd.get());
+        continue;
+      }
+
+      if ((epoll_events & (EPOLLERR | EPOLLHUP | EPOLLRDHUP)) != 0)
+      {
+        remove_client(epoll_fd.get(), fd);
+      }
+      else if ((epoll_events & EPOLLIN) != 0)
+        handle_client_readable(epoll_fd.get(), fd);
+    }
+
+    if (mode_ == Mode::k_inetd && clients_.empty())
+      return;
+  }
 }
 
 } // namespace remountd

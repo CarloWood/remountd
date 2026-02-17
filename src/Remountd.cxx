@@ -1,9 +1,18 @@
 #include "Remountd.h"
 #include "SocketServer.h"
 
+#include <cerrno>
 #include <memory>
+#include <system_error>
 
 namespace remountd {
+
+Remountd::Remountd(int argc, char* argv[])
+{
+  Application::initialize(argc, argv);
+  // The Application base class must be initialized before we can create the SocketServer.
+  socket_server_ = std::make_unique<SocketServer>(inetd_mode_);
+}
 
 Remountd::~Remountd() = default;
 
@@ -24,10 +33,12 @@ void Remountd::print_usage_extra(std::ostream& os) const
   os << " [--inetd]";
 }
 
-void Remountd::initialize(int argc, char* argv[])
+void Remountd::mainloop()
 {
-  Application::initialize(argc, argv);
-  socket_server_ = std::make_unique<SocketServer>(*this, inetd_mode_);
+  if (!socket_server_)
+    throw std::system_error(EINVAL, std::generic_category(), "socket server is not initialized");
+
+  socket_server_->mainloop(termination_fd());
 }
 
 //virtual

@@ -3,7 +3,30 @@
 
 #include <cerrno>
 #include <memory>
+#include <string_view>
 #include <system_error>
+
+namespace {
+
+// RemountdClient
+//
+// Concrete client used by remountd. Protocol handling will be added later.
+class RemountdClient final : public remountd::SocketServer::Client
+{
+ public:
+  // Construct a remountd client wrapper around a connected socket.
+  explicit RemountdClient(int fd) : Client(fd)
+  {
+  }
+
+ protected:
+  // Handle one complete newline-terminated message.
+  void new_message(std::string_view /*message*/) override
+  {
+  }
+};
+
+} // namespace
 
 namespace remountd {
 
@@ -12,6 +35,11 @@ Remountd::Remountd(int argc, char* argv[])
   Application::initialize(argc, argv);
   // The Application base class must be initialized before we can create the SocketServer.
   socket_server_ = std::make_unique<SocketServer>(inetd_mode_);
+  socket_server_->set_client_factory(
+      [](int client_fd)
+      {
+        return std::make_unique<RemountdClient>(client_fd);
+      });
 }
 
 Remountd::~Remountd() = default;

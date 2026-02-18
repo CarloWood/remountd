@@ -2,66 +2,116 @@
 #include "Application.h"
 #include "remountd_error.h"
 
+#include <fcntl.h>
 #include <sys/epoll.h>
 #include <sys/socket.h>
 #include <sys/un.h>
+#include <syslog.h>
 #include <unistd.h>
 #include <systemd/sd-daemon.h>
 
 #include <algorithm>
 #include <cerrno>
 #include <filesystem>
+#include <string_view>
 #include <system_error>
+#include <utility>
+#include <iostream>
 
 namespace {
 
 constexpr int k_listen_backlog = 4;
 constexpr int k_systemd_listen_fd_start = SD_LISTEN_FDS_START;
 
-} // namespace
-
-namespace remountd {
-
-// SocketServer::Client
-//
-// Represents a connected client socket and consumes readable data.
-class SocketServer::Client
+// Set the O_NONBLOCK flag on a file descriptor.
+void make_nonblocking(int fd)
 {
- private:
-  ScopedFd fd_;                       // Owned connected client socket.
+  int const flags = fcntl(fd, F_GETFL, 0);
+  if (flags < 0)
+    throw std::system_error(errno, std::generic_category(), "fcntl(F_GETFL) failed");
 
+  if ((flags & O_NONBLOCK) != 0)
+    return;
+
+  if (fcntl(fd, F_SETFL, flags | O_NONBLOCK) != 0)
+    throw std::system_error(errno, std::generic_category(), "fcntl(F_SETFL) failed");
+}
+
+// NullClient
+//
+// Default client implementation that silently discards complete messages.
+class NullClient final : public remountd::SocketServer::Client
+{
  public:
-  // Take ownership of connected client file descriptor.
-  explicit Client(int fd) : fd_(fd) { }
-
-  // Return underlying client file descriptor.
-  int fd() const { return fd_.get(); }
-
-  // Read currently available data; return false when peer closed.
-  bool handle_readable()
+  // Construct a null client for the given file descriptor.
+  explicit NullClient(int fd) : Client(fd)
   {
-    char buffer[4096];
-    for (;;)
-    {
-      ssize_t const read_ret = read(fd_.get(), buffer, sizeof(buffer));
-      if (read_ret > 0)
-        continue;
+  }
 
-      if (read_ret == 0)
-        return false;
-
-      if (errno == EINTR)
-        continue;
-
-      if (errno == EAGAIN || errno == EWOULDBLOCK)
-        return true;
-
-      throw std::system_error(errno, std::generic_category(), "read(client_fd) failed");
-    }
+ protected:
+  // Discard one complete message.
+  void new_message(std::string_view message) override
+  {
+    std::cout << "Received: \"" << message << "\"\n";
   }
 };
 
-SocketServer::SocketServer(bool inetd_mode)
+} // namespace
+
+namespace remountd {
+SocketServer::Client::Client(int fd) : fd_(fd)
+{
+}
+
+SocketServer::Client::~Client() = default;
+
+bool SocketServer::Client::handle_readable()
+{
+  char buffer[4096];
+  for (;;)
+  {
+    ssize_t const read_ret = read(fd_.get(), buffer, sizeof(buffer));
+    if (read_ret > 0)
+    {
+      for (ssize_t i = 0; i < read_ret; ++i)
+      {
+        char const byte = buffer[i];
+        if (byte == '\n')
+        {
+          new_message(partial_message_);
+          partial_message_.clear();
+          continue;
+        }
+
+        partial_message_.push_back(byte);
+        if (partial_message_.size() >= max_message_length_c)
+        {
+          syslog(LOG_ERR, "Dropping client fd %d: no newline within %zu characters", fd_.get(), max_message_length_c);
+          return false;
+        }
+      }
+      continue;
+    }
+
+    if (read_ret == 0)
+      return false;
+
+    if (errno == EINTR)
+      continue;
+
+    if (errno == EAGAIN || errno == EWOULDBLOCK)
+      return true;
+
+    throw std::system_error(errno, std::generic_category(), "read(client_fd) failed");
+  }
+}
+
+SocketServer::SocketServer(bool inetd_mode) :
+    client_factory_(
+        [](int fd)
+        {
+          return std::make_unique<NullClient>(fd);
+        })
 {
   initialize(inetd_mode);
 }
@@ -102,6 +152,7 @@ void SocketServer::open_inetd()
   if (!is_socket_fd(STDIN_FILENO))
     throw_error(errc::inetd_stdin_not_socket, "--inetd was specified but stdin is not a socket");
 
+  make_nonblocking(STDIN_FILENO);
   listener_fd_.reset(STDIN_FILENO);
   close_listener_on_cleanup_ = false;
   mode_ = Mode::k_inetd;
@@ -123,6 +174,7 @@ bool SocketServer::open_systemd()
   if (!is_socket_fd(fd))
     throw_error(errc::systemd_inherited_fd_not_socket, "inherited FD " + std::to_string(fd) + " is not a UNIX stream socket");
 
+  make_nonblocking(fd);
   listener_fd_.reset(fd);
   mode_ = Mode::k_systemd;
   return true;
@@ -151,7 +203,7 @@ void SocketServer::create_standalone_listener(std::string const& socket_path)
       throw_error(errc::socket_path_not_socket, "path exists and is not a socket: '" + socket_native_path + "'");
   }
 
-  ScopedFd fd(socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0));
+  ScopedFd fd(socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC | SOCK_NONBLOCK, 0));
   if (!fd.valid())
     throw std::system_error(errno, std::generic_category(), "socket(AF_UNIX) failed");
 
@@ -220,9 +272,24 @@ void SocketServer::remove_fd_from_epoll(int epoll_fd, int fd)
 
 void SocketServer::add_client(int epoll_fd, int client_fd)
 {
-  std::unique_ptr<Client> client = std::make_unique<Client>(client_fd);
+  std::unique_ptr<Client> client = create_client(client_fd);
   add_fd_to_epoll(epoll_fd, client->fd(), EPOLLIN | EPOLLRDHUP);
   clients_.emplace(client->fd(), std::move(client));
+}
+
+std::unique_ptr<SocketServer::Client> SocketServer::create_client(int client_fd)
+{
+  if (!client_factory_)
+    throw std::system_error(EINVAL, std::generic_category(), "client factory is not configured");
+
+  std::unique_ptr<Client> client = client_factory_(client_fd);
+  if (!client)
+    throw std::system_error(EINVAL, std::generic_category(), "client factory returned null");
+
+  if (client->fd() != client_fd)
+    throw std::system_error(EINVAL, std::generic_category(), "client factory returned mismatched file descriptor");
+
+  return client;
 }
 
 void SocketServer::remove_client(int epoll_fd, int client_fd)
@@ -287,6 +354,14 @@ void SocketServer::drain_termination_fd(int terminate_fd)
 
     throw std::system_error(errno, std::generic_category(), "read(terminate_fd) failed");
   }
+}
+
+void SocketServer::set_client_factory(client_factory_type client_factory)
+{
+  if (!client_factory)
+    throw std::system_error(EINVAL, std::generic_category(), "client factory is empty");
+
+  client_factory_ = std::move(client_factory);
 }
 
 void SocketServer::mainloop(int terminate_fd)

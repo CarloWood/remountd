@@ -77,22 +77,7 @@ SocketServer::Client::~Client()
 
 void SocketServer::Client::disconnect() noexcept
 {
-  if (!fd_.valid())
-    return;
-
-  int const client_fd = fd_.get();
-  try
-  {
-    socket_server_.remove_client(client_fd);
-  }
-  catch (std::exception const& exception)
-  {
-    syslog(LOG_ERR, "Failed to remove client fd %d from epoll: %s", client_fd, exception.what());
-  }
-  catch (...)
-  {
-    syslog(LOG_ERR, "Failed to remove client fd %d from epoll", client_fd);
-  }
+  fd_.reset();
 }
 
 bool SocketServer::Client::handle_readable()

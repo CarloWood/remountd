@@ -1,3 +1,4 @@
+#include "sys.h"
 #include "Remountd.h"
 #include "remountd_error.h"
 
@@ -5,8 +6,13 @@
 #include <iostream>
 #include <system_error>
 
+#include "debug.h"
+
 int main(int argc, char* argv[])
 {
+  Debug(NAMESPACE_DEBUG::init());
+  Dout(dc::notice, "Entering main()...");
+
   using namespace remountd;
 
   try

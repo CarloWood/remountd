@@ -13,6 +13,7 @@ add_executable(remountd
 
 target_link_libraries(remountd
   PRIVATE
+    ${AICXX_OBJECTS_LIST}
     PkgConfig::LIBSYSTEMD
 )
 
@@ -20,4 +21,5 @@ target_include_directories(remountd
   PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_BINARY_DIR}
+    ${CMAKE_SOURCE_DIR}
 )

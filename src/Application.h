@@ -9,6 +9,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace remountd {
 
@@ -21,6 +22,16 @@ namespace remountd {
 class Application
 {
  public:
+  // AllowedMountPoint
+  //
+  // One configured allow-entry that maps an external name to a mount path.
+  struct AllowedMountPoint
+  {
+    std::string name_;             // Configured public name (for example: "codex").
+    std::filesystem::path path_;   // Filesystem path represented by this name.
+  };
+
+ public:
   static constexpr char const* default_config_path_c = "/etc/remountd/config.yaml";
   static Application& instance() { return *s_instance_; }
 
@@ -30,6 +41,9 @@ class Application
   ApplicationInfo application_info_;                            // Metadata captured during initialize().
   std::filesystem::path config_path_ = default_config_path_c;   // Path of the YAML config file.
   std::optional<std::string> socket_override_;                  // Optional override for socket path from CLI.
+  bool config_loaded_ = false;                                  // True after config values were parsed and cached.
+  std::filesystem::path configured_socket_path_;                // Parsed `socket` value from config.
+  std::vector<AllowedMountPoint> allowed_mount_points_;         // Parsed `allow` entries from config.
   bool initialized_ = false;                                    // True after successful initialize().
   ScopedFd terminate_read_fd_;                                  // Read-end of termination self-pipe.
   ScopedFd terminate_write_fd_;                                 // Write-end of termination self-pipe.
@@ -44,8 +58,8 @@ class Application
   // Print application name and decoded version.
   void print_version() const;
 
-  // Read and parse `socket:` from config_path_.
-  std::filesystem::path parse_socket_path_from_config() const;
+  // Parse and cache config values from config_path_.
+  void load_config();
 
   // Create the self-pipe used to wake epoll/mainloop on termination.
   void create_termination_pipe();
@@ -93,6 +107,12 @@ class Application
 
   // Resolve configured socket path from override or config file.
   std::filesystem::path socket_path() const;
+
+  // Return parsed mount points from the config.
+  std::vector<AllowedMountPoint> const& allowed_mount_points() const { return allowed_mount_points_; }
+
+  // Format parsed mount points as lines "name path", optionally with a header.
+  std::string format_allowed_mount_points(bool include_header) const;
 
   // Access configured config file path.
   std::filesystem::path const& config_path() const { return config_path_; }

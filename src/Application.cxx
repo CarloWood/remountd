@@ -3,11 +3,14 @@
 #include "remountd_error.h"
 #include "version.h"
 
+#include <algorithm>
 #include <fcntl.h>
 #include <filesystem>
 #include <fstream>
+#include <iomanip>
 #include <iostream>
 #include <signal.h>
+#include <sstream>
 #include <system_error>
 #include <unistd.h>
 
@@ -54,6 +57,30 @@ std::string_view trim(std::string_view in)
   return in;
 }
 
+std::string_view trim_left(std::string_view in)
+{
+  while (!in.empty() && (in.front() == ' ' || in.front() == '\t' || in.front() == '\r' || in.front() == '\n'))
+    in.remove_prefix(1);
+
+  return in;
+}
+
+std::string_view trim_right(std::string_view in)
+{
+  while (!in.empty() && (in.back() == ' ' || in.back() == '\t' || in.back() == '\r' || in.back() == '\n'))
+    in.remove_suffix(1);
+
+  return in;
+}
+
+std::string_view unquote(std::string_view in)
+{
+  if (in.size() >= 2 && ((in.front() == '"' && in.back() == '"') || (in.front() == '\'' && in.back() == '\'')))
+    return in.substr(1, in.size() - 2);
+
+  return in;
+}
+
 std::string utf8_to_string(std::u8string const& text)
 {
   return std::string(reinterpret_cast<char const*>(text.data()), text.size());
@@ -83,7 +110,7 @@ Application::~Application()
 
 void Application::print_usage(char const* argv0) const
 {
-  std::cerr << "Usage: " << argv0 << " [--help] [--version] [--config <path>] [--socket <path>]";
+  std::cerr << "Usage: " << argv0 << " [--help] [--version] [--list] [--config <path>] [--socket <path>]";
   print_usage_extra(std::cerr);
   std::cerr << "\n";
 }
@@ -110,6 +137,7 @@ void Application::parse_command_line_parameters(int argc, char* argv[])
   if (argc <= 0 || argv == nullptr || !sane_argument(argv[0]))
     throw_error(errc::invalid_argument, "invalid process arguments");
 
+  bool list_requested = false;
   for (int i = 1; i < argc; ++i)
   {
     if (!sane_argument(argv[i]))
@@ -119,13 +147,19 @@ void Application::parse_command_line_parameters(int argc, char* argv[])
     if (arg == "--help" || arg == "-h")
     {
       print_usage(argv[0]);
-      throw_error(errc::help_requested, "help requested");
+      throw_error(errc::no_error, "help requested");
     }
 
     if (arg == "--version")
     {
       print_version();
-      throw_error(errc::version_requested, "version requested");
+      throw_error(errc::no_error, "version requested");
+    }
+
+    if (arg == "--list")
+    {
+      list_requested = true;
+      continue;
     }
 
     if (arg == "--config")
@@ -151,44 +185,111 @@ void Application::parse_command_line_parameters(int argc, char* argv[])
 
     throw_error(errc::unknown_argument, "unknown argument: " + std::string(arg));
   }
+
+  if (list_requested)
+  {
+    load_config();
+    std::cout << format_allowed_mount_points(true);
+    throw_error(errc::no_error, "list requested");
+  }
 }
 
-std::filesystem::path Application::parse_socket_path_from_config() const
+void Application::load_config()
 {
+  if (config_loaded_)
+    return;
+
   std::ifstream config(config_path_);
   if (!config.is_open())
     throw_error(errc::config_open_failed, "unable to open config file '" + config_path_.native() + "'");
 
+  configured_socket_path_.clear();
+  allowed_mount_points_.clear();
+
+  bool in_allow_section = false;
+  std::string current_allow_name;
   std::string line;
   while (std::getline(config, line))
   {
-    std::string_view current(line);
+    std::string_view current = trim_right(line);
     std::size_t const comment = current.find('#');
     if (comment != std::string_view::npos)
       current = current.substr(0, comment);
-    current = trim(current);
+    current = trim_right(current);
     if (current.empty())
       continue;
 
-    std::size_t const colon = current.find(':');
+    std::size_t indent = 0;
+    while (indent < current.size() && (current[indent] == ' ' || current[indent] == '\t'))
+      ++indent;
+
+    std::string_view const content = trim_left(current.substr(indent));
+    if (content.empty())
+      continue;
+
+    if (indent == 0)
+    {
+      in_allow_section = false;
+      current_allow_name.clear();
+    }
+
+    std::size_t const colon = content.find(':');
     if (colon == std::string_view::npos)
       continue;
 
-    std::string_view const key = trim(current.substr(0, colon));
-    if (key != "socket")
+    std::string_view const key = trim(content.substr(0, colon));
+    std::string_view const raw_value = trim(content.substr(colon + 1));
+
+    if (indent == 0)
+    {
+      if (key == "socket")
+      {
+        std::string_view const value = unquote(raw_value);
+        if (value.empty())
+          throw_error(errc::config_socket_empty, "config key 'socket' is empty in '" + config_path_.native() + "'");
+        configured_socket_path_ = std::string(value);
+        continue;
+      }
+
+      if (key == "allow" && raw_value.empty())
+      {
+        in_allow_section = true;
+        continue;
+      }
+
+      continue;
+    }
+
+    if (!in_allow_section)
       continue;
 
-    std::string_view value = trim(current.substr(colon + 1));
-    if (value.size() >= 2 && ((value.front() == '"' && value.back() == '"') || (value.front() == '\'' && value.back() == '\'')))
-      value = value.substr(1, value.size() - 2);
+    if (indent == 2)
+    {
+      if (!raw_value.empty())
+        continue;
 
-    if (value.empty())
-      throw_error(errc::config_socket_empty, "config key 'socket' is empty in '" + config_path_.native() + "'");
+      if (!key.empty())
+      {
+        current_allow_name = std::string(key);
+        continue;
+      }
+    }
 
-    return value;
+    if (indent >= 4 && !current_allow_name.empty() && key == "path")
+    {
+      std::string_view const value = unquote(raw_value);
+      if (value.empty())
+        continue;
+
+      allowed_mount_points_.push_back({current_allow_name, std::filesystem::path(value)});
+      current_allow_name.clear();
+    }
   }
 
-  throw_error(errc::config_socket_missing, "config file '" + config_path_.native() + "' does not define a 'socket' key");
+  if (configured_socket_path_.empty())
+    throw_error(errc::config_socket_missing, "config file '" + config_path_.native() + "' does not define a 'socket' key");
+
+  config_loaded_ = true;
 }
 
 void Application::create_termination_pipe()
@@ -255,6 +356,9 @@ void Application::initialize(int argc, char** argv)
   if (argc > 0)
     parse_command_line_parameters(argc, argv);
 
+  // Parse and cache configuration.
+  load_config();
+
   // Set up signal handling.
   create_termination_pipe();
   s_signal_write_fd_ = terminate_write_fd_.get();
@@ -285,7 +389,28 @@ std::filesystem::path Application::socket_path() const
   if (socket_override_.has_value())
     return *socket_override_;
 
-  return parse_socket_path_from_config();
+  return configured_socket_path_;
+}
+
+std::string Application::format_allowed_mount_points(bool include_header) const
+{
+  std::ostringstream out;
+  if (include_header)
+  {
+    std::size_t name_width = std::string("NAME").size();
+    for (AllowedMountPoint const& allowed_mount_point : allowed_mount_points_)
+      name_width = std::max(name_width, allowed_mount_point.name_.size());
+
+    out << std::left << std::setw(static_cast<int>(name_width)) << "NAME" << " PATH\n";
+    for (AllowedMountPoint const& allowed_mount_point : allowed_mount_points_)
+      out << std::left << std::setw(static_cast<int>(name_width)) << allowed_mount_point.name_ << " " << allowed_mount_point.path_.native() << "\n";
+  }
+  else
+  {
+    for (AllowedMountPoint const& allowed_mount_point : allowed_mount_points_)
+      out << allowed_mount_point.name_ << " " << allowed_mount_point.path_.native() << "\n";
+  }
+  return out.str();
 }
 
 //virtual

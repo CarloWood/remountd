@@ -2,6 +2,7 @@
 
 #include <utility>      // std::exchange
 #include <unistd.h>     // close()
+#include "debug.h"
 
 // ScopedFd
 //
@@ -69,7 +70,10 @@ class ScopedFd
   void reset(int fd = -1)
   {
     if (fd_ >= 0)
+    {
+      Dout(dc::notice, "close(" << fd_ << ")");
       close(fd_);
+    }
     fd_ = fd;
   }
 

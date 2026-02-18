@@ -2,17 +2,50 @@
 #include "Remountd.h"
 #include "SocketServer.h"
 
+#include <sys/socket.h>
+#include <syslog.h>
+
 #include <cerrno>
 #include <memory>
+#include <string>
 #include <string_view>
 #include <system_error>
 
+namespace remountd {
 namespace {
+
+// Send text to a connected client socket.
+void send_text_to_client(int fd, std::string_view text)
+{
+  std::size_t sent_total = 0;
+  while (sent_total < text.size())
+  {
+    ssize_t const sent = send(fd, text.data() + sent_total, text.size() - sent_total, MSG_NOSIGNAL);
+    if (sent > 0)
+    {
+      sent_total += static_cast<std::size_t>(sent);
+      continue;
+    }
+
+    if (sent < 0 && errno == EINTR)
+      continue;
+
+    if (sent < 0 && (errno == EAGAIN || errno == EWOULDBLOCK))
+    {
+      syslog(LOG_WARNING, "Partial reply sent to client fd %d", fd);
+      return;
+    }
+
+    if (sent < 0)
+      syslog(LOG_ERR, "send failed for client fd %d: %m", fd);
+    return;
+  }
+}
 
 // RemountdClient
 //
 // Concrete client used by remountd. Protocol handling will be added later.
-class RemountdClient final : public remountd::SocketServer::Client
+class RemountdClient final : public SocketServer::Client
 {
  public:
   // Construct a remountd client wrapper around a connected socket.
@@ -26,12 +59,20 @@ class RemountdClient final : public remountd::SocketServer::Client
   void new_message(std::string_view message) override
   {
     DoutEntering(dc::notice, "RemountdClient::new_message(\"" << message << "\")");
+
+    if (message == "list")
+    {
+      std::string const reply = Application::instance().format_allowed_mount_points(false);
+      send_text_to_client(fd(), reply);
+    }
+    else if (message == "quit")
+    {
+      Application::instance().quit();
+    }
   }
 };
 
 } // namespace
-
-namespace remountd {
 
 Remountd::Remountd(int argc, char* argv[])
 {

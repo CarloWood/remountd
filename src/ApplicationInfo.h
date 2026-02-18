@@ -4,6 +4,11 @@
 #include <cstdint>
 #include <utility>
 
+#include "debug.h"
+#ifdef CWDEBUG
+#include "cwds/debug_ostream_operators.h"
+#endif
+
 namespace remountd {
 
 // ApplicationInfo
@@ -31,12 +36,14 @@ class ApplicationInfo
   // Set the application display name.
   void set_application_name(std::u8string const& application_name)
   {
+    DoutEntering(dc::notice, "ApplicationInfo::set_application_name(" << application_name << ")");
     application_name_ = application_name;
   }
 
   // Set the encoded application version.
   void set_application_version(uint32_t encoded_version)
   {
+    DoutEntering(dc::notice, "ApplicationInfo::set_application_version(" << encoded_version << ")");
     encoded_version_ = encoded_version;
   }
 

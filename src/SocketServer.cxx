@@ -1,3 +1,4 @@
+#include "sys.h"
 #include "SocketServer.h"
 #include "Application.h"
 #include "remountd_error.h"
@@ -12,11 +13,15 @@
 
 #include <algorithm>
 #include <cerrno>
-#include <filesystem>
 #include <string_view>
 #include <system_error>
 #include <utility>
 #include <iostream>
+
+#include "debug.h"
+#ifdef CWDEBUG
+#include "libcwd/buf2str.h"
+#endif
 
 namespace {
 
@@ -50,9 +55,9 @@ class NullClient final : public remountd::SocketServer::Client
 
  protected:
   // Discard one complete message.
-  void new_message(std::string_view message) override
+  void new_message(std::string_view DEBUG_ONLY(message)) override
   {
-    std::cout << "Received: \"" << message << "\"\n";
+    DoutEntering(dc::notice, "NullClient::new_message(\"" << message << "\".");
   }
 };
 
@@ -61,22 +66,36 @@ class NullClient final : public remountd::SocketServer::Client
 namespace remountd {
 SocketServer::Client::Client(int fd) : fd_(fd)
 {
+  DoutEntering(dc::notice, "SocketServer::Client::Client(" << fd << ") [" << this << "]");
 }
 
-SocketServer::Client::~Client() = default;
+SocketServer::Client::~Client()
+{
+  DoutEntering(dc::notice, "SocketServer::Client::~Client() [" << this << "]");
+}
 
 bool SocketServer::Client::handle_readable()
 {
+  DoutEntering(dc::notice, "SocketServer::Client::handle_readable()");
+
   char buffer[4096];
   for (;;)
   {
     ssize_t const read_ret = read(fd_.get(), buffer, sizeof(buffer));
     if (read_ret > 0)
     {
+      Dout(dc::notice, "Received " << read_ret << " bytes: '" << libcwd::buf2str(buffer, read_ret) << "'");
       for (ssize_t i = 0; i < read_ret; ++i)
       {
         char const byte = buffer[i];
-        if (byte == '\n')
+        // Skip a \n if that immediately follows a \r.
+        if (saw_carriage_return_ && byte == '\n')
+        {
+          saw_carriage_return_ = false;
+          continue;
+        }
+        saw_carriage_return_ = byte == '\r';
+        if (byte == '\r' || byte == '\n')
         {
           new_message(partial_message_);
           partial_message_.clear();
@@ -133,7 +152,7 @@ void SocketServer::cleanup()
   if (unlink_on_cleanup_ && !standalone_socket_path_.empty())
   {
     std::error_code ec;
-    std::filesystem::remove(std::filesystem::path(standalone_socket_path_), ec);
+    std::filesystem::remove(standalone_socket_path_, ec);
   }
 
   close_listener_on_cleanup_ = true;
@@ -149,6 +168,8 @@ bool SocketServer::is_socket_fd(int fd) const
 
 void SocketServer::open_inetd()
 {
+  DoutEntering(dc::notice, "SocketServer::open_inetd()");
+
   if (!is_socket_fd(STDIN_FILENO))
     throw_error(errc::inetd_stdin_not_socket, "--inetd was specified but stdin is not a socket");
 
@@ -160,6 +181,8 @@ void SocketServer::open_inetd()
 
 bool SocketServer::open_systemd()
 {
+  DoutEntering(dc::notice, "SocketServer::open_systemd()");
+
   int const listen_fds = sd_listen_fds(0);
   if (listen_fds < 0)
     throw std::system_error(-listen_fds, std::system_category(), "sd_listen_fds failed");
@@ -180,9 +203,10 @@ bool SocketServer::open_systemd()
   return true;
 }
 
-void SocketServer::create_standalone_listener(std::string const& socket_path)
+void SocketServer::create_standalone_listener(std::filesystem::path const& socket_fs_path)
 {
-  std::filesystem::path const socket_fs_path(socket_path);
+  DoutEntering(dc::notice, "SocketServer::create_standalone_listener(" << socket_fs_path << ")");
+
   std::string const socket_native_path = socket_fs_path.string();
 
   if (socket_native_path.size() >= sizeof(sockaddr_un::sun_path))
@@ -229,12 +253,14 @@ void SocketServer::create_standalone_listener(std::string const& socket_path)
 
   listener_fd_.reset(fd.release());
   unlink_on_cleanup_ = true;
-  standalone_socket_path_ = socket_native_path;
+  standalone_socket_path_ = socket_fs_path;
   mode_ = Mode::k_standalone;
 }
 
 void SocketServer::open_standalone()
 {
+  DoutEntering(dc::notice, "SocketServer::open_standalone()");
+
   create_standalone_listener(Application::instance().socket_path());
 }
 
@@ -254,6 +280,8 @@ void SocketServer::initialize(bool inetd_mode)
 
 void SocketServer::add_fd_to_epoll(int epoll_fd, int fd, uint32_t events)
 {
+  DoutEntering(dc::notice, "SocketServer::add_fd_to_epoll(" << epoll_fd << ", " << fd << ", " << events << ")");
+
   epoll_event event{};
   event.events = events;
   event.data.fd = fd;
@@ -263,6 +291,8 @@ void SocketServer::add_fd_to_epoll(int epoll_fd, int fd, uint32_t events)
 
 void SocketServer::remove_fd_from_epoll(int epoll_fd, int fd)
 {
+  DoutEntering(dc::notice, "SocketServer::remove_fd_from_epoll(" << epoll_fd << ", " << fd << ")");
+
   if (epoll_ctl(epoll_fd, EPOLL_CTL_DEL, fd, nullptr) == 0)
     return;
   if (errno == ENOENT || errno == EBADF)
@@ -272,6 +302,8 @@ void SocketServer::remove_fd_from_epoll(int epoll_fd, int fd)
 
 void SocketServer::add_client(int epoll_fd, int client_fd)
 {
+  DoutEntering(dc::notice, "SocketServer::add_client(" << epoll_fd << ", " << client_fd << ")");
+
   std::unique_ptr<Client> client = create_client(client_fd);
   add_fd_to_epoll(epoll_fd, client->fd(), EPOLLIN | EPOLLRDHUP);
   clients_.emplace(client->fd(), std::move(client));
@@ -279,6 +311,8 @@ void SocketServer::add_client(int epoll_fd, int client_fd)
 
 std::unique_ptr<SocketServer::Client> SocketServer::create_client(int client_fd)
 {
+  DoutEntering(dc::notice, "SocketServer::create_client(" << client_fd << ")");
+
   if (!client_factory_)
     throw std::system_error(EINVAL, std::generic_category(), "client factory is not configured");
 
@@ -294,6 +328,8 @@ std::unique_ptr<SocketServer::Client> SocketServer::create_client(int client_fd)
 
 void SocketServer::remove_client(int epoll_fd, int client_fd)
 {
+  DoutEntering(dc::notice, "SocketServer::remove_client(" << epoll_fd << ", " << client_fd << ")");
+
   auto const iter = clients_.find(client_fd);
   if (iter == clients_.end())
     return;
@@ -325,6 +361,8 @@ void SocketServer::accept_new_clients(int epoll_fd)
 
 void SocketServer::handle_client_readable(int epoll_fd, int client_fd)
 {
+  DoutEntering(dc::notice, "SocketServer::handle_client_readable(" << epoll_fd << ", " << client_fd << ")");
+
   auto iter = clients_.find(client_fd);
   if (iter == clients_.end())
     return;
@@ -366,6 +404,8 @@ void SocketServer::set_client_factory(client_factory_type client_factory)
 
 void SocketServer::mainloop(int terminate_fd)
 {
+  DoutEntering(dc::notice, "SocketServer::mainloop(" << terminate_fd << ")");
+
   if (terminate_fd < 0)
     throw std::system_error(EINVAL, std::generic_category(), "invalid terminate fd");
 

@@ -1,13 +1,17 @@
+#include "sys.h"
 #include "Application.h"
 #include "remountd_error.h"
 #include "version.h"
 
 #include <fcntl.h>
+#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <signal.h>
 #include <system_error>
 #include <unistd.h>
+
+#include "debug.h"
 
 namespace {
 
@@ -149,11 +153,11 @@ void Application::parse_command_line_parameters(int argc, char* argv[])
   }
 }
 
-std::string Application::parse_socket_path_from_config() const
+std::filesystem::path Application::parse_socket_path_from_config() const
 {
   std::ifstream config(config_path_);
   if (!config.is_open())
-    throw_error(errc::config_open_failed, "unable to open config file '" + config_path_ + "'");
+    throw_error(errc::config_open_failed, "unable to open config file '" + config_path_.native() + "'");
 
   std::string line;
   while (std::getline(config, line))
@@ -179,12 +183,12 @@ std::string Application::parse_socket_path_from_config() const
       value = value.substr(1, value.size() - 2);
 
     if (value.empty())
-      throw_error(errc::config_socket_empty, "config key 'socket' is empty in '" + config_path_ + "'");
+      throw_error(errc::config_socket_empty, "config key 'socket' is empty in '" + config_path_.native() + "'");
 
-    return std::string(value);
+    return value;
   }
 
-  throw_error(errc::config_socket_missing, "config file '" + config_path_ + "' does not define a 'socket' key");
+  throw_error(errc::config_socket_missing, "config file '" + config_path_.native() + "' does not define a 'socket' key");
 }
 
 void Application::create_termination_pipe()
@@ -262,6 +266,8 @@ void Application::initialize(int argc, char** argv)
 
 void Application::run()
 {
+  DoutEntering(dc::notice, "Application::run()");
+
   if (!initialized_)
     throw_error(errc::application_not_initialized, "run called before initialize");
 
@@ -274,7 +280,7 @@ void Application::quit()
   notify_termination_fd(terminate_write_fd_.get());
 }
 
-std::string Application::socket_path() const
+std::filesystem::path Application::socket_path() const
 {
   if (socket_override_.has_value())
     return *socket_override_;

@@ -14,22 +14,27 @@ int main(int argc, char* argv[])
   Dout(dc::notice, "Entering main()...");
 
   using namespace remountd;
-
+  int exit_code = 0;
   try
   {
     Remountd application(argc, argv);
     application.run();
-    return 0;
   }
   catch (std::system_error const& error)
   {
-    if (error.code() == errc::help_requested || error.code() == errc::version_requested)
-      return 0;
-    std::cerr << argv[0] << ": " << error.what() << "\n";
+    if (error.code() != errc::help_requested &&
+        error.code() != errc::version_requested)
+    {
+      std::cerr << argv[0] << ": " << error.what() << "\n";
+      exit_code = 1;
+    }
   }
   catch (std::exception const& error)
   {
     std::cerr << argv[0] << ": " << error.what() << "\n";
+    exit_code = 1;
   }
-  return 1;
+
+  Dout(dc::notice, "Leaving main()...");
+  return exit_code;
 }

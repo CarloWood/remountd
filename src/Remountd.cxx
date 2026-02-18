@@ -1,3 +1,4 @@
+#include "sys.h"
 #include "Remountd.h"
 #include "SocketServer.h"
 
@@ -17,12 +18,14 @@ class RemountdClient final : public remountd::SocketServer::Client
   // Construct a remountd client wrapper around a connected socket.
   explicit RemountdClient(int fd) : Client(fd)
   {
+    DoutEntering(dc::notice, "RemountdClient::RemountdClient(" << fd << ")");
   }
 
  protected:
   // Handle one complete newline-terminated message.
-  void new_message(std::string_view /*message*/) override
+  void new_message(std::string_view message) override
   {
+    DoutEntering(dc::notice, "RemountdClient::new_message(\"" << message << "\")");
   }
 };
 
@@ -63,6 +66,8 @@ void Remountd::print_usage_extra(std::ostream& os) const
 
 void Remountd::mainloop()
 {
+  DoutEntering(dc::notice, "Remountd::mainloop()");
+
   if (!socket_server_)
     throw std::system_error(EINVAL, std::generic_category(), "socket server is not initialized");
 

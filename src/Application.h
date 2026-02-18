@@ -4,6 +4,7 @@
 #include "ApplicationInfo.h"
 
 #include <cstdint>
+#include <filesystem>
 #include <iosfwd>
 #include <optional>
 #include <string>
@@ -24,14 +25,14 @@ class Application
   static Application& instance() { return *s_instance_; }
 
  private:
-  static Application* s_instance_;                    // Singleton application instance for signal dispatch.
-  static int s_signal_write_fd_;                      // Write-end FD used directly by the async signal handler.
-  ApplicationInfo application_info_;                  // Metadata captured during initialize().
-  std::string config_path_ = default_config_path_c;   // Path of the YAML config file.
-  std::optional<std::string> socket_override_;        // Optional override for socket path from CLI.
-  bool initialized_ = false;                          // True after successful initialize().
-  ScopedFd terminate_read_fd_;                        // Read-end of termination self-pipe.
-  ScopedFd terminate_write_fd_;                       // Write-end of termination self-pipe.
+  static Application* s_instance_;                              // Singleton application instance for signal dispatch.
+  static int s_signal_write_fd_;                                // Write-end FD used directly by the async signal handler.
+  ApplicationInfo application_info_;                            // Metadata captured during initialize().
+  std::filesystem::path config_path_ = default_config_path_c;   // Path of the YAML config file.
+  std::optional<std::string> socket_override_;                  // Optional override for socket path from CLI.
+  bool initialized_ = false;                                    // True after successful initialize().
+  ScopedFd terminate_read_fd_;                                  // Read-end of termination self-pipe.
+  ScopedFd terminate_write_fd_;                                 // Write-end of termination self-pipe.
 
  private:
   // Parse common command line parameters and delegate unknown options to derived class.
@@ -44,7 +45,7 @@ class Application
   void print_version() const;
 
   // Read and parse `socket:` from config_path_.
-  std::string parse_socket_path_from_config() const;
+  std::filesystem::path parse_socket_path_from_config() const;
 
   // Create the self-pipe used to wake epoll/mainloop on termination.
   void create_termination_pipe();
@@ -91,10 +92,10 @@ class Application
   void quit();
 
   // Resolve configured socket path from override or config file.
-  std::string socket_path() const;
+  std::filesystem::path socket_path() const;
 
   // Access configured config file path.
-  std::string const& config_path() const { return config_path_; }
+  std::filesystem::path const& config_path() const { return config_path_; }
 
   // Access configured socket path override.
   std::optional<std::string> const& socket_override() const { return socket_override_; }

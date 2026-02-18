@@ -4,6 +4,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <filesystem>
 #include <functional>
 #include <memory>
 #include <string>
@@ -28,9 +29,10 @@ class SocketServer
   class Client
   {
    private:
-    static constexpr std::size_t max_message_length_c = 64;   // Maximum number of non-newline characters per message.
-    ScopedFd fd_;                                              // Owned connected client socket.
-    std::string partial_message_;                              // Bytes of the current not-yet-terminated message.
+    static constexpr std::size_t max_message_length_c = 64;     // Maximum number of non-newline characters per message.
+    ScopedFd fd_;                                               // Owned connected client socket.
+    std::string partial_message_;                               // Bytes of the current not-yet-terminated message.
+    bool saw_carriage_return_ = false;                          // True if the last character received was a carriage-return ('\r').
 
    protected:
     // Handle one complete message (without trailing newline).
@@ -70,7 +72,7 @@ class SocketServer
   ScopedFd listener_fd_;                                        // Listener socket (or connected inetd socket) initialized by initialize().
   Mode mode_ = Mode::k_none;                                    // Active socket server mode.
   bool close_listener_on_cleanup_ = true;                       // Close listener_fd_ when cleanup() is called.
-  std::string standalone_socket_path_;                          // Path to standalone socket file for cleanup.
+  std::filesystem::path standalone_socket_path_;                // Path to standalone socket file for cleanup.
   bool unlink_on_cleanup_ = false;                              // Remove standalone_socket_path_ during cleanup().
   client_factory_type client_factory_;                          // Factory that creates concrete Client instances for accepted fds.
   std::unordered_map<int, std::unique_ptr<Client>> clients_;    // Active clients keyed by file descriptor.
@@ -92,7 +94,7 @@ class SocketServer
   void open_standalone();
 
   // Create, bind, and listen on a standalone UNIX socket path.
-  void create_standalone_listener(std::string const& socket_path);
+  void create_standalone_listener(std::filesystem::path const& socket_fs_path);
 
   // Initialize socket mode and base listener file descriptor.
   void initialize(bool inetd_mode);

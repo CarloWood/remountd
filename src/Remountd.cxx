@@ -49,26 +49,27 @@ class RemountdClient final : public SocketServer::Client
 {
  public:
   // Construct a remountd client wrapper around a connected socket.
-  explicit RemountdClient(int fd) : Client(fd)
+  RemountdClient(SocketServer& socket_server, int fd) : Client(socket_server, fd)
   {
     DoutEntering(dc::notice, "RemountdClient::RemountdClient(" << fd << ")");
   }
 
  protected:
   // Handle one complete newline-terminated message.
-  void new_message(std::string_view message) override
+  bool new_message(std::string_view message) override
   {
     DoutEntering(dc::notice, "RemountdClient::new_message(\"" << message << "\")");
+
+    if (message == "quit")
+      return false;
 
     if (message == "list")
     {
       std::string const reply = Application::instance().format_allowed_mount_points(false);
       send_text_to_client(fd(), reply);
     }
-    else if (message == "quit")
-    {
-      Application::instance().quit();
-    }
+
+    return true;
   }
 };
 
@@ -80,9 +81,9 @@ Remountd::Remountd(int argc, char* argv[])
   // The Application base class must be initialized before we can create the SocketServer.
   socket_server_ = std::make_unique<SocketServer>(inetd_mode_);
   socket_server_->set_client_factory(
-      [](int client_fd)
+      [](SocketServer& socket_server, int client_fd)
       {
-        return std::make_unique<RemountdClient>(client_fd);
+        return std::make_unique<RemountdClient>(socket_server, client_fd);
       });
 }
 

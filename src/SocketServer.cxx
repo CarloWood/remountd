@@ -16,7 +16,6 @@
 #include <string_view>
 #include <system_error>
 #include <utility>
-#include <iostream>
 
 #include "debug.h"
 #ifdef CWDEBUG
@@ -49,22 +48,24 @@ class NullClient final : public remountd::SocketServer::Client
 {
  public:
   // Construct a null client for the given file descriptor.
-  explicit NullClient(int fd) : Client(fd)
+  explicit NullClient(remountd::SocketServer& socket_server, int fd) : Client(socket_server, fd)
   {
   }
 
  protected:
   // Discard one complete message.
-  void new_message(std::string_view DEBUG_ONLY(message)) override
+  bool new_message(std::string_view DEBUG_ONLY(message)) override
   {
     DoutEntering(dc::notice, "NullClient::new_message(\"" << message << "\".");
+    return true;
   }
 };
 
 } // namespace
 
 namespace remountd {
-SocketServer::Client::Client(int fd) : fd_(fd)
+
+SocketServer::Client::Client(SocketServer& socket_server, int fd) : socket_server_(socket_server), fd_(fd)
 {
   DoutEntering(dc::notice, "SocketServer::Client::Client(" << fd << ") [" << this << "]");
 }
@@ -74,9 +75,32 @@ SocketServer::Client::~Client()
   DoutEntering(dc::notice, "SocketServer::Client::~Client() [" << this << "]");
 }
 
+void SocketServer::Client::disconnect() noexcept
+{
+  if (!fd_.valid())
+    return;
+
+  int const client_fd = fd_.get();
+  try
+  {
+    socket_server_.remove_client(client_fd);
+  }
+  catch (std::exception const& exception)
+  {
+    syslog(LOG_ERR, "Failed to remove client fd %d from epoll: %s", client_fd, exception.what());
+  }
+  catch (...)
+  {
+    syslog(LOG_ERR, "Failed to remove client fd %d from epoll", client_fd);
+  }
+}
+
 bool SocketServer::Client::handle_readable()
 {
-  DoutEntering(dc::notice, "SocketServer::Client::handle_readable()");
+  //DoutEntering(dc::notice, "SocketServer::Client::handle_readable()");
+
+  if (!fd_.valid())
+    return false;
 
   char buffer[4096];
   for (;;)
@@ -84,7 +108,7 @@ bool SocketServer::Client::handle_readable()
     ssize_t const read_ret = read(fd_.get(), buffer, sizeof(buffer));
     if (read_ret > 0)
     {
-      Dout(dc::notice, "Received " << read_ret << " bytes: '" << libcwd::buf2str(buffer, read_ret) << "'");
+      //Dout(dc::notice, "Received " << read_ret << " bytes: '" << libcwd::buf2str(buffer, read_ret) << "'");
       for (ssize_t i = 0; i < read_ret; ++i)
       {
         char const byte = buffer[i];
@@ -97,8 +121,11 @@ bool SocketServer::Client::handle_readable()
         saw_carriage_return_ = byte == '\r';
         if (byte == '\r' || byte == '\n')
         {
-          new_message(partial_message_);
+          if (!new_message(partial_message_))
+            return false;
           partial_message_.clear();
+          if (!fd_.valid())
+            return false;
           continue;
         }
 
@@ -127,9 +154,9 @@ bool SocketServer::Client::handle_readable()
 
 SocketServer::SocketServer(bool inetd_mode) :
     client_factory_(
-        [](int fd)
+        [](SocketServer& socket_server, int client_fd)
         {
-          return std::make_unique<NullClient>(fd);
+          return std::make_unique<NullClient>(socket_server, client_fd);
         })
 {
   initialize(inetd_mode);
@@ -142,7 +169,11 @@ SocketServer::~SocketServer()
 
 void SocketServer::cleanup()
 {
+  DoutEntering(dc::notice, "SocketServer::cleanup()");
+
+  Dout(dc::notice, "Calling clients_.clear()");
   clients_.clear();
+  epoll_fd_.reset();
 
   if (close_listener_on_cleanup_)
     listener_fd_.reset();
@@ -278,34 +309,41 @@ void SocketServer::initialize(bool inetd_mode)
     open_standalone();
 }
 
-void SocketServer::add_fd_to_epoll(int epoll_fd, int fd, uint32_t events)
+void SocketServer::add_fd_to_epoll(int fd, uint32_t events)
 {
-  DoutEntering(dc::notice, "SocketServer::add_fd_to_epoll(" << epoll_fd << ", " << fd << ", " << events << ")");
+  DoutEntering(dc::notice, "SocketServer::add_fd_to_epoll(" << fd << ", " << events << ")");
+
+  if (!epoll_fd_.valid())
+    throw std::system_error(EINVAL, std::generic_category(), "epoll instance is not initialized");
 
   epoll_event event{};
   event.events = events;
   event.data.fd = fd;
-  if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, fd, &event) != 0)
+  if (epoll_ctl(epoll_fd_.get(), EPOLL_CTL_ADD, fd, &event) != 0)
     throw std::system_error(errno, std::generic_category(), "epoll_ctl(ADD) failed");
 }
 
-void SocketServer::remove_fd_from_epoll(int epoll_fd, int fd)
+void SocketServer::remove_fd_from_epoll(int fd)
 {
-  DoutEntering(dc::notice, "SocketServer::remove_fd_from_epoll(" << epoll_fd << ", " << fd << ")");
+  DoutEntering(dc::notice, "SocketServer::remove_fd_from_epoll(" << fd << ")");
 
-  if (epoll_ctl(epoll_fd, EPOLL_CTL_DEL, fd, nullptr) == 0)
+  if (!epoll_fd_.valid())
+    return;
+
+  if (epoll_ctl(epoll_fd_.get(), EPOLL_CTL_DEL, fd, nullptr) == 0)
     return;
   if (errno == ENOENT || errno == EBADF)
     return;
   throw std::system_error(errno, std::generic_category(), "epoll_ctl(DEL) failed");
 }
 
-void SocketServer::add_client(int epoll_fd, int client_fd)
+void SocketServer::add_client(int client_fd)
 {
-  DoutEntering(dc::notice, "SocketServer::add_client(" << epoll_fd << ", " << client_fd << ")");
+  DoutEntering(dc::notice, "SocketServer::add_client(" << client_fd << ")");
 
   std::unique_ptr<Client> client = create_client(client_fd);
-  add_fd_to_epoll(epoll_fd, client->fd(), EPOLLIN | EPOLLRDHUP);
+  add_fd_to_epoll(client_fd, EPOLLIN | EPOLLRDHUP);
+  Dout(dc::notice, "Adding client with fd " << client->fd() << " to clients_.");
   clients_.emplace(client->fd(), std::move(client));
 }
 
@@ -316,7 +354,7 @@ std::unique_ptr<SocketServer::Client> SocketServer::create_client(int client_fd)
   if (!client_factory_)
     throw std::system_error(EINVAL, std::generic_category(), "client factory is not configured");
 
-  std::unique_ptr<Client> client = client_factory_(client_fd);
+  std::unique_ptr<Client> client = client_factory_(*this, client_fd);
   if (!client)
     throw std::system_error(EINVAL, std::generic_category(), "client factory returned null");
 
@@ -326,26 +364,26 @@ std::unique_ptr<SocketServer::Client> SocketServer::create_client(int client_fd)
   return client;
 }
 
-void SocketServer::remove_client(int epoll_fd, int client_fd)
+void SocketServer::remove_client(int client_fd)
 {
-  DoutEntering(dc::notice, "SocketServer::remove_client(" << epoll_fd << ", " << client_fd << ")");
-
+  DoutEntering(dc::notice, "SocketServer::remove_client(" << client_fd << ")");
   auto const iter = clients_.find(client_fd);
   if (iter == clients_.end())
     return;
 
-  remove_fd_from_epoll(epoll_fd, client_fd);
+  remove_fd_from_epoll(client_fd);
+  Dout(dc::notice, "Erasing client with fd " << client_fd << " from clients_.");
   clients_.erase(iter);
 }
 
-void SocketServer::accept_new_clients(int epoll_fd)
+void SocketServer::accept_new_clients()
 {
   for (;;)
   {
     int const client_fd = accept4(listener_fd_.get(), nullptr, nullptr, SOCK_NONBLOCK | SOCK_CLOEXEC);
     if (client_fd >= 0)
     {
-      add_client(epoll_fd, client_fd);
+      add_client(client_fd);
       continue;
     }
 
@@ -359,9 +397,9 @@ void SocketServer::accept_new_clients(int epoll_fd)
   }
 }
 
-void SocketServer::handle_client_readable(int epoll_fd, int client_fd)
+void SocketServer::handle_client_readable(int client_fd)
 {
-  DoutEntering(dc::notice, "SocketServer::handle_client_readable(" << epoll_fd << ", " << client_fd << ")");
+  //DoutEntering(dc::notice, "SocketServer::handle_client_readable(" << client_fd << ")");
 
   auto iter = clients_.find(client_fd);
   if (iter == clients_.end())
@@ -369,7 +407,7 @@ void SocketServer::handle_client_readable(int epoll_fd, int client_fd)
 
   bool const keep_client = iter->second->handle_readable();
   if (!keep_client)
-    remove_client(epoll_fd, client_fd);
+    remove_client(client_fd);
 }
 
 void SocketServer::drain_termination_fd(int terminate_fd)
@@ -409,25 +447,38 @@ void SocketServer::mainloop(int terminate_fd)
   if (terminate_fd < 0)
     throw std::system_error(EINVAL, std::generic_category(), "invalid terminate fd");
 
-  ScopedFd epoll_fd(epoll_create1(EPOLL_CLOEXEC));
-  if (!epoll_fd.valid())
+  if (epoll_fd_.valid())
+    throw std::system_error(EALREADY, std::generic_category(), "mainloop already running");
+
+  epoll_fd_.reset(epoll_create1(EPOLL_CLOEXEC));
+  if (!epoll_fd_.valid())
     throw std::system_error(errno, std::generic_category(), "epoll_create1 failed");
 
-  add_fd_to_epoll(epoll_fd.get(), terminate_fd, EPOLLIN);
+  struct epoll_reset_guard
+  {
+    ScopedFd& epoll_fd_;
+
+    ~epoll_reset_guard()
+    {
+      epoll_fd_.reset();
+    }
+  } const reset_guard {epoll_fd_};
+
+  add_fd_to_epoll(terminate_fd, EPOLLIN);
 
   if (mode_ == Mode::k_inetd)
   {
     int const client_fd = listener_fd_.release();
     close_listener_on_cleanup_ = true;
-    add_client(epoll_fd.get(), client_fd);
+    add_client(client_fd);
   }
   else
-    add_fd_to_epoll(epoll_fd.get(), listener_fd_.get(), EPOLLIN);
+    add_fd_to_epoll(listener_fd_.get(), EPOLLIN);
 
   epoll_event events[32];
   for (;;)
   {
-    int const event_count = epoll_wait(epoll_fd.get(), events, 32, -1);
+    int const event_count = epoll_wait(epoll_fd_.get(), events, 32, -1);
     if (event_count < 0)
     {
       if (errno == EINTR)
@@ -449,16 +500,16 @@ void SocketServer::mainloop(int terminate_fd)
       if (mode_ != Mode::k_inetd && fd == listener_fd_.get())
       {
         if ((epoll_events & EPOLLIN) != 0)
-          accept_new_clients(epoll_fd.get());
+          accept_new_clients();
         continue;
       }
 
       if ((epoll_events & (EPOLLERR | EPOLLHUP | EPOLLRDHUP)) != 0)
       {
-        remove_client(epoll_fd.get(), fd);
+        remove_client(fd);
       }
       else if ((epoll_events & EPOLLIN) != 0)
-        handle_client_readable(epoll_fd.get(), fd);
+        handle_client_readable(fd);
     }
 
     if (mode_ == Mode::k_inetd && clients_.empty())

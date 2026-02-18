@@ -30,17 +30,19 @@ class SocketServer
   {
    private:
     static constexpr std::size_t max_message_length_c = 64;     // Maximum number of non-newline characters per message.
+    SocketServer& socket_server_;                                // Owning socket server instance.
     ScopedFd fd_;                                               // Owned connected client socket.
     std::string partial_message_;                               // Bytes of the current not-yet-terminated message.
     bool saw_carriage_return_ = false;                          // True if the last character received was a carriage-return ('\r').
 
    protected:
     // Handle one complete message (without trailing newline).
-    virtual void new_message(std::string_view message) = 0;
+    // The client should be removed if this returns false.
+    virtual bool new_message(std::string_view message) = 0;
 
    public:
     // Take ownership of the connected client file descriptor.
-    explicit Client(int fd);
+    Client(SocketServer& socket_server, int fd);
 
     // Virtual destructor for polymorphic derived clients.
     virtual ~Client();
@@ -51,12 +53,15 @@ class SocketServer
     // Return the owned client file descriptor.
     int fd() const { return fd_.get(); }
 
+    // Cleanly disconnect this client: remove from epoll and close fd.
+    void disconnect() noexcept;
+
     // Consume currently available input data and dispatch complete messages.
     // Returns false when the connection must be closed.
     bool handle_readable();
   };
 
-  using client_factory_type = std::function<std::unique_ptr<Client>(int)>;   // Creates one client object for an accepted fd.
+  using client_factory_type = std::function<std::unique_ptr<Client>(SocketServer&, int)>;   // Creates one client object for an accepted fd.
 
  public:
   // Runtime mode selected during initialization.
@@ -70,6 +75,7 @@ class SocketServer
 
  private:
   ScopedFd listener_fd_;                                        // Listener socket (or connected inetd socket) initialized by initialize().
+  ScopedFd epoll_fd_;                                           // epoll instance used by mainloop.
   Mode mode_ = Mode::k_none;                                    // Active socket server mode.
   bool close_listener_on_cleanup_ = true;                       // Close listener_fd_ when cleanup() is called.
   std::filesystem::path standalone_socket_path_;                // Path to standalone socket file for cleanup.
@@ -100,25 +106,25 @@ class SocketServer
   void initialize(bool inetd_mode);
 
   // Add `fd` to epoll with given event mask.
-  void add_fd_to_epoll(int epoll_fd, int fd, uint32_t events);
+  void add_fd_to_epoll(int fd, uint32_t events);
 
   // Remove `fd` from epoll.
-  void remove_fd_from_epoll(int epoll_fd, int fd);
+  void remove_fd_from_epoll(int fd);
 
   // Accept all currently pending connections from listener_fd_.
-  void accept_new_clients(int epoll_fd);
+  void accept_new_clients();
 
   // Register a newly accepted client with epoll and client map.
-  void add_client(int epoll_fd, int client_fd);
+  void add_client(int client_fd);
 
   // Construct one concrete client object for the given connected fd.
   std::unique_ptr<Client> create_client(int client_fd);
 
-  // Remove client from epoll and erase it from client map.
-  void remove_client(int epoll_fd, int client_fd);
+  // Disconnect client and erase it from client map.
+  void remove_client(int client_fd);
 
   // Invoke readable handler for a client and remove it if connection is closed.
-  void handle_client_readable(int epoll_fd, int client_fd);
+  void handle_client_readable(int client_fd);
 
   // Drain all bytes currently available from termination fd.
   void drain_termination_fd(int terminate_fd);

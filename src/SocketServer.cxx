@@ -34,7 +34,7 @@ constexpr int k_systemd_listen_fd_start = SD_LISTEN_FDS_START;
 // ScopedUmask
 //
 // RAII helper that temporarily changes the process umask and restores it.
-class ScopedUmask final
+class ScopedUmask
 {
  public:
   // Set process umask to mask for the lifetime of this object.

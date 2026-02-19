@@ -4,8 +4,10 @@
 #include "remountd_error.h"
 
 #include <fcntl.h>
+#include <grp.h>
 #include <sys/epoll.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <sys/un.h>
 #include <unistd.h>
 #include <systemd/sd-daemon.h>
@@ -29,6 +31,31 @@ namespace {
 constexpr int k_listen_backlog = 4;
 constexpr int k_systemd_listen_fd_start = SD_LISTEN_FDS_START;
 
+// ScopedUmask
+//
+// RAII helper that temporarily changes the process umask and restores it.
+class ScopedUmask final
+{
+ public:
+  // Set process umask to mask for the lifetime of this object.
+  explicit ScopedUmask(mode_t mask) : old_mask_(umask(mask))
+  {
+  }
+
+  // Restore previous umask.
+  ~ScopedUmask()
+  {
+    umask(old_mask_);
+  }
+
+  ScopedUmask(ScopedUmask const&) = delete;
+  ScopedUmask& operator=(ScopedUmask const&) = delete;
+
+ private:
+  // Previous process umask to restore on destruction.
+  mode_t old_mask_;
+};
+
 // Set the O_NONBLOCK flag on a file descriptor.
 void make_nonblocking(int fd)
 {
@@ -41,6 +68,38 @@ void make_nonblocking(int fd)
 
   if (fcntl(fd, F_SETFL, flags | O_NONBLOCK) != 0)
     throw std::system_error(errno, std::generic_category(), "fcntl(F_SETFL) failed");
+}
+
+// Configure filesystem ownership and permissions of a standalone socket path.
+//
+// When running as root, attempt to set the socket's group to "remountd" and:
+// - if that succeeds, set mode to 0660
+// - otherwise, set mode to 0600
+// When not running as root, leave ownership/mode unchanged.
+void configure_standalone_socket_permissions(std::filesystem::path const& socket_fs_path, std::string const& socket_native_path)
+{
+  if (geteuid() != 0)
+    return;
+
+  bool group_set = false;
+  if (group const* const grp = getgrnam("remountd"))
+  {
+    if (chown(socket_native_path.c_str(), static_cast<uid_t>(-1), grp->gr_gid) == 0)
+      group_set = true;
+    else
+      Dout(dc::notice, "Failed to chown socket group to 'remountd': " << strerror(errno));
+  }
+  else
+    Dout(dc::notice, "Group 'remountd' does not exist; keeping default socket group.");
+
+  mode_t const mode = group_set ? 0660 : 0600;
+  if (chmod(socket_native_path.c_str(), mode) != 0)
+  {
+    int const err = errno;
+    std::error_code ec;
+    std::filesystem::remove(socket_fs_path, ec);
+    throw std::system_error(err, std::generic_category(), "chmod('" + socket_native_path + "') failed");
+  }
 }
 
 // NullClient
@@ -180,6 +239,11 @@ void SocketServer::create_standalone_listener(std::filesystem::path const& socke
   std::copy(socket_native_path.begin(), socket_native_path.end(), addr.sun_path);
   addr.sun_path[socket_native_path.size()] = '\0';
 
+  // Reduce permissions from the moment of bind when running as root.
+  std::optional<ScopedUmask> umask_guard;
+  if (geteuid() == 0)
+    umask_guard.emplace(0177);
+
   if (bind(fd.get(), reinterpret_cast<sockaddr const*>(&addr), sizeof(addr)) != 0)
   {
     int const bind_errno = errno;
@@ -187,6 +251,8 @@ void SocketServer::create_standalone_listener(std::filesystem::path const& socke
       throw std::system_error(bind_errno, std::generic_category(), "socket path already exists: '" + socket_native_path + "'");
     throw std::system_error(bind_errno, std::generic_category(), "bind('" + socket_native_path + "') failed");
   }
+
+  configure_standalone_socket_permissions(socket_fs_path, socket_native_path);
 
   if (listen(fd.get(), k_listen_backlog) != 0)
   {

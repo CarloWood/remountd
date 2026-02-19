@@ -12,6 +12,8 @@
 
 #include <algorithm>
 #include <cerrno>
+#include <cstring>
+#include <optional>
 #include <string_view>
 #include <system_error>
 #include <utility>

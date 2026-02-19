@@ -72,6 +72,19 @@ allow:
 
 ---
 
+## Installation from source tree
+
+If you install from the source tree (instead of using a package), run this
+after `make install`:
+
+```sh
+sudo scripts/post-install.sh
+```
+
+This creates the `remountd` group if it does not already exist.
+
+---
+
 ## systemd socket activation (recommended)
 
 `/etc/systemd/system/remountd.socket`
@@ -82,7 +95,7 @@ Description=remountd control socket
 [Socket]
 ListenStream=/run/remountd.sock
 SocketUser=root
-SocketGroup=mountd
+SocketGroup=remountd
 SocketMode=0660
 Accept=yes
 

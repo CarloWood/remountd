@@ -1,3 +1,11 @@
+# Configuration
+
+To configure run
+```
+    cmake -S "$REPOBASE" -B "$BUILDDIR" -DCMAKE\_BUILD\_TYPE="Debug" -DEnableDebug=OFF
+```
+to get debug output, remove the `-DEnableDebug=OFF`.
+
 # C++ formatting
 
 * Use East-const everywhere.

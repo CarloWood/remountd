@@ -10,6 +10,7 @@ add_executable(remountd
   SocketServer.cxx
   remountd_error.cxx
   remountd.cxx
+  utils.cxx
 )
 
 target_link_libraries(remountd
@@ -19,6 +20,26 @@ target_link_libraries(remountd
 )
 
 target_include_directories(remountd
+  PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_BINARY_DIR}
+    ${CMAKE_SOURCE_DIR}
+)
+
+add_executable(remountdctl
+  Application.cxx
+  RemountdCtl.cxx
+  remountd_error.cxx
+  remountdctl.cxx
+  utils.cxx
+)
+
+target_link_libraries(remountdctl
+  PRIVATE
+    ${AICXX_OBJECTS_LIST}
+)
+
+target_include_directories(remountdctl
   PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_BINARY_DIR}

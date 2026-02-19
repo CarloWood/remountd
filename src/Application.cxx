@@ -1,6 +1,7 @@
 #include "sys.h"
 #include "Application.h"
 #include "remountd_error.h"
+#include "utils.h"
 #include "version.h"
 
 #include <algorithm>
@@ -44,46 +45,6 @@ std::optional<std::string> parse_long_option_with_value(int argc, char* argv[], 
 
   *index = i;
   return argv[i];
-}
-
-std::string_view trim(std::string_view in)
-{
-  while (!in.empty() && (in.front() == ' ' || in.front() == '\t' || in.front() == '\r' || in.front() == '\n'))
-    in.remove_prefix(1);
-
-  while (!in.empty() && (in.back() == ' ' || in.back() == '\t' || in.back() == '\r' || in.back() == '\n'))
-    in.remove_suffix(1);
-
-  return in;
-}
-
-std::string_view trim_left(std::string_view in)
-{
-  while (!in.empty() && (in.front() == ' ' || in.front() == '\t' || in.front() == '\r' || in.front() == '\n'))
-    in.remove_prefix(1);
-
-  return in;
-}
-
-std::string_view trim_right(std::string_view in)
-{
-  while (!in.empty() && (in.back() == ' ' || in.back() == '\t' || in.back() == '\r' || in.back() == '\n'))
-    in.remove_suffix(1);
-
-  return in;
-}
-
-std::string_view unquote(std::string_view in)
-{
-  if (in.size() >= 2 && ((in.front() == '"' && in.back() == '"') || (in.front() == '\'' && in.back() == '\'')))
-    return in.substr(1, in.size() - 2);
-
-  return in;
-}
-
-std::string utf8_to_string(std::u8string const& text)
-{
-  return std::string(reinterpret_cast<char const*>(text.data()), text.size());
 }
 
 } // namespace

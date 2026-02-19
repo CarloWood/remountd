@@ -42,14 +42,14 @@ void send_text_to_client(int fd, std::string_view text)
   }
 }
 
-// RemountdClient
+// Remountd:Client
 //
 // Concrete client used by remountd. Protocol handling will be added later.
-class RemountdClient final : public SocketServer::Client
+class RemountdClient final : public SocketClient
 {
  public:
   // Construct a remountd client wrapper around a connected socket.
-  RemountdClient(SocketServer& socket_server, int fd) : Client(socket_server, fd)
+  RemountdClient(SocketServer& socket_server, int fd) : SocketClient(socket_server, fd)
   {
     DoutEntering(dc::notice, "RemountdClient::RemountdClient(" << fd << ")");
   }

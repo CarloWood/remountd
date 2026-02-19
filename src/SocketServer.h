@@ -1,6 +1,6 @@
 #pragma once
 
-#include "ScopedFd.h"
+#include "SocketClient.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -22,46 +22,7 @@ namespace remountd {
 class SocketServer
 {
  public:
-  // Client
-  //
-  // Represents a connected client socket and receives complete protocol
-  // messages. Messages are ASCII/UTF-8 text lines terminated by '\n'.
-  class Client
-  {
-   private:
-    static constexpr std::size_t max_message_length_c = 64;     // Maximum number of non-newline characters per message.
-    SocketServer& socket_server_;                                // Owning socket server instance.
-    ScopedFd fd_;                                               // Owned connected client socket.
-    std::string partial_message_;                               // Bytes of the current not-yet-terminated message.
-    bool saw_carriage_return_ = false;                          // True if the last character received was a carriage-return ('\r').
-
-   protected:
-    // Handle one complete message (without trailing newline).
-    // The client should be removed if this returns false.
-    virtual bool new_message(std::string_view message) = 0;
-
-   public:
-    // Take ownership of the connected client file descriptor.
-    Client(SocketServer& socket_server, int fd);
-
-    // Virtual destructor for polymorphic derived clients.
-    virtual ~Client();
-
-    Client(Client const&) = delete;
-    Client& operator=(Client const&) = delete;
-
-    // Return the owned client file descriptor.
-    int fd() const { return fd_.get(); }
-
-    // Cleanly disconnect this client: remove from epoll and close fd.
-    void disconnect() noexcept;
-
-    // Consume currently available input data and dispatch complete messages.
-    // Returns false when the connection must be closed.
-    bool handle_readable();
-  };
-
-  using client_factory_type = std::function<std::unique_ptr<Client>(SocketServer&, int)>;   // Creates one client object for an accepted fd.
+  using client_factory_type = std::function<std::unique_ptr<SocketClient>(SocketServer&, int)>;   // Creates one client object for an accepted fd.
 
  public:
   // Runtime mode selected during initialization.
@@ -74,14 +35,14 @@ class SocketServer
   };
 
  private:
-  ScopedFd listener_fd_;                                        // Listener socket (or connected inetd socket) initialized by initialize().
-  ScopedFd epoll_fd_;                                           // epoll instance used by mainloop.
-  Mode mode_ = Mode::k_none;                                    // Active socket server mode.
-  bool close_listener_on_cleanup_ = true;                       // Close listener_fd_ when cleanup() is called.
-  std::filesystem::path standalone_socket_path_;                // Path to standalone socket file for cleanup.
-  bool unlink_on_cleanup_ = false;                              // Remove standalone_socket_path_ during cleanup().
-  client_factory_type client_factory_;                          // Factory that creates concrete Client instances for accepted fds.
-  std::unordered_map<int, std::unique_ptr<Client>> clients_;    // Active clients keyed by file descriptor.
+  ScopedFd listener_fd_;                                                // Listener socket (or connected inetd socket) initialized by initialize().
+  ScopedFd epoll_fd_;                                                   // epoll instance used by mainloop.
+  Mode mode_ = Mode::k_none;                                            // Active socket server mode.
+  bool close_listener_on_cleanup_ = true;                               // Close listener_fd_ when cleanup() is called.
+  std::filesystem::path standalone_socket_path_;                        // Path to standalone socket file for cleanup.
+  bool unlink_on_cleanup_ = false;                                      // Remove standalone_socket_path_ during cleanup().
+  client_factory_type client_factory_;                                  // Factory that creates concrete SocketClient instances for accepted fds.
+  std::unordered_map<int, std::unique_ptr<SocketClient>> clients_;      // Active clients keyed by file descriptor.
 
  private:
   // Release all runtime resources and restore default state.
@@ -118,7 +79,7 @@ class SocketServer
   void add_client(int client_fd);
 
   // Construct one concrete client object for the given connected fd.
-  std::unique_ptr<Client> create_client(int client_fd);
+  std::unique_ptr<SocketClient> create_client(int client_fd);
 
   // Disconnect client and erase it from client map.
   void remove_client(int client_fd);

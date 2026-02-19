@@ -7,7 +7,6 @@
 #include <sys/epoll.h>
 #include <sys/socket.h>
 #include <sys/un.h>
-#include <syslog.h>
 #include <unistd.h>
 #include <systemd/sd-daemon.h>
 
@@ -22,6 +21,7 @@
 #include "libcwd/buf2str.h"
 #endif
 
+namespace remountd {
 namespace {
 
 constexpr int k_listen_backlog = 4;
@@ -44,11 +44,11 @@ void make_nonblocking(int fd)
 // NullClient
 //
 // Default client implementation that silently discards complete messages.
-class NullClient final : public remountd::SocketServer::Client
+class NullClient final : public SocketClient
 {
  public:
   // Construct a null client for the given file descriptor.
-  explicit NullClient(remountd::SocketServer& socket_server, int fd) : Client(socket_server, fd)
+  explicit NullClient(SocketServer& socket_server, int fd) : SocketClient(socket_server, fd)
   {
   }
 
@@ -62,80 +62,6 @@ class NullClient final : public remountd::SocketServer::Client
 };
 
 } // namespace
-
-namespace remountd {
-
-SocketServer::Client::Client(SocketServer& socket_server, int fd) : socket_server_(socket_server), fd_(fd)
-{
-  DoutEntering(dc::notice, "SocketServer::Client::Client(" << fd << ") [" << this << "]");
-}
-
-SocketServer::Client::~Client()
-{
-  DoutEntering(dc::notice, "SocketServer::Client::~Client() [" << this << "]");
-}
-
-void SocketServer::Client::disconnect() noexcept
-{
-  fd_.reset();
-}
-
-bool SocketServer::Client::handle_readable()
-{
-  //DoutEntering(dc::notice, "SocketServer::Client::handle_readable()");
-
-  if (!fd_.valid())
-    return false;
-
-  char buffer[4096];
-  for (;;)
-  {
-    ssize_t const read_ret = read(fd_.get(), buffer, sizeof(buffer));
-    if (read_ret > 0)
-    {
-      //Dout(dc::notice, "Received " << read_ret << " bytes: '" << libcwd::buf2str(buffer, read_ret) << "'");
-      for (ssize_t i = 0; i < read_ret; ++i)
-      {
-        char const byte = buffer[i];
-        // Skip a \n if that immediately follows a \r.
-        if (saw_carriage_return_ && byte == '\n')
-        {
-          saw_carriage_return_ = false;
-          continue;
-        }
-        saw_carriage_return_ = byte == '\r';
-        if (byte == '\r' || byte == '\n')
-        {
-          if (!new_message(partial_message_))
-            return false;
-          partial_message_.clear();
-          if (!fd_.valid())
-            return false;
-          continue;
-        }
-
-        partial_message_.push_back(byte);
-        if (partial_message_.size() >= max_message_length_c)
-        {
-          syslog(LOG_ERR, "Dropping client fd %d: no newline within %zu characters", fd_.get(), max_message_length_c);
-          return false;
-        }
-      }
-      continue;
-    }
-
-    if (read_ret == 0)
-      return false;
-
-    if (errno == EINTR)
-      continue;
-
-    if (errno == EAGAIN || errno == EWOULDBLOCK)
-      return true;
-
-    throw std::system_error(errno, std::generic_category(), "read(client_fd) failed");
-  }
-}
 
 SocketServer::SocketServer(bool inetd_mode) :
     client_factory_(
@@ -326,20 +252,20 @@ void SocketServer::add_client(int client_fd)
 {
   DoutEntering(dc::notice, "SocketServer::add_client(" << client_fd << ")");
 
-  std::unique_ptr<Client> client = create_client(client_fd);
+  std::unique_ptr<SocketClient> client = create_client(client_fd);
   add_fd_to_epoll(client_fd, EPOLLIN | EPOLLRDHUP);
   Dout(dc::notice, "Adding client with fd " << client->fd() << " to clients_.");
   clients_.emplace(client->fd(), std::move(client));
 }
 
-std::unique_ptr<SocketServer::Client> SocketServer::create_client(int client_fd)
+std::unique_ptr<SocketClient> SocketServer::create_client(int client_fd)
 {
   DoutEntering(dc::notice, "SocketServer::create_client(" << client_fd << ")");
 
   if (!client_factory_)
     throw std::system_error(EINVAL, std::generic_category(), "client factory is not configured");
 
-  std::unique_ptr<Client> client = client_factory_(*this, client_fd);
+  std::unique_ptr<SocketClient> client = client_factory_(*this, client_fd);
   if (!client)
     throw std::system_error(EINVAL, std::generic_category(), "client factory returned null");
 

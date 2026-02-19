@@ -6,6 +6,7 @@ configure_file(version.h.in ${CMAKE_CURRENT_BINARY_DIR}/version.h @ONLY)
 add_executable(remountd
   Application.cxx
   Remountd.cxx
+  SocketClient.cxx
   SocketServer.cxx
   remountd_error.cxx
   remountd.cxx

@@ -129,27 +129,24 @@ void RemountCtl::mainloop()
 
   exit_code_ = 0;
 
-  if (positional_args_.empty())
+  if (positional_args_.size() != 2)
   {
-    std::cerr << "ERROR: missing command.\n";
+    std::cerr << "remountctl: invalid number of arguments.\n";
     print_usage();
     exit_code_ = 1;
     return;
   }
 
-  // Special-case: "ro|rw <name>" gets the PID appended when <name> is valid.
-  if (positional_args_.size() == 2 && (positional_args_[0] == "ro" || positional_args_[0] == "rw"))
+  if (positional_args_[0] != "ro" && positional_args_[0] != "rw")
   {
-    std::string_view const name(positional_args_[1]);
-    if (!find_allowed_path(name).has_value())
-    {
-      std::cerr << format_unknown_identifier_error(name);
-      exit_code_ = 1;
-      return;
-    }
-
-    positional_args_.push_back(std::to_string(getpid()));
+    std::cerr << "remountctl: unknown command '" << positional_args_[0] << "'.\n";
+    print_usage();
+    exit_code_ = 1;
+    return;
   }
+
+  // Append PID.
+  positional_args_.push_back(std::to_string(getpid()));
 
   std::string message;
   for (std::size_t i = 0; i < positional_args_.size(); ++i)

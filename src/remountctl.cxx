@@ -1,5 +1,5 @@
 #include "sys.h"
-#include "RemountdCtl.h"
+#include "RemountCtl.h"
 #include "remountd_error.h"
 
 #include <exception>
@@ -17,8 +17,9 @@ int main(int argc, char* argv[])
   int exit_code = 0;
   try
   {
-    RemountdCtl application(argc, argv);
+    RemountCtl application(argc, argv);
     application.run();
+    exit_code = application.exit_code();
   }
   catch (std::system_error const& error)
   {

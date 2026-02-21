@@ -6,8 +6,8 @@
 
 namespace remountd {
 
-// Send text to a connected client socket.
-void send_text_to_client(int fd, std::string_view text)
+// Send text to a connected stream socket.
+void send_text_to_socket(int fd, std::string_view text)
 {
   std::size_t sent_total = 0;
   while (sent_total < text.size())
@@ -32,6 +32,12 @@ void send_text_to_client(int fd, std::string_view text)
       syslog(LOG_ERR, "send failed for client fd %d: %m", fd);
     return;
   }
+}
+
+std::string format_unknown_identifier_error(std::string_view name)
+{
+  return "ERROR: " + std::string(name) + " is not an allowed identifier in " +
+      Application::instance().config_path().native() + ".\n";
 }
 
 // Split one command line into whitespace-separated tokens.

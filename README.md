@@ -22,7 +22,7 @@ Typical use-case: allow scripts running inside a sandbox (e.g. bubblewrap with
 ## How it works
 
 - `remountctl` connects to `/run/remountd.sock` and sends a simple command:
-  - `ro <name>` or `rw <name>`
+  - `ro <name> <pid>` or `rw <name> <pid>` (remountctl appends its PID automatically)
 - `remountd` validates:
   - The caller (via UNIX peer credentials).
   - The requested `<name>` against an allowlist in the config.
@@ -51,7 +51,7 @@ remountctl ro codex
 
 ### List configured targets
 ```sh
-remountctl list
+remountctl --list
 ```
 
 ---

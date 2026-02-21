@@ -26,20 +26,20 @@ target_include_directories(remountd
     ${CMAKE_SOURCE_DIR}
 )
 
-add_executable(remountdctl
+add_executable(remountctl
   Application.cxx
-  RemountdCtl.cxx
+  RemountCtl.cxx
   remountd_error.cxx
-  remountdctl.cxx
+  remountctl.cxx
   utils.cxx
 )
 
-target_link_libraries(remountdctl
+target_link_libraries(remountctl
   PRIVATE
     ${AICXX_OBJECTS_LIST}
 )
 
-target_include_directories(remountdctl
+target_include_directories(remountctl
   PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_BINARY_DIR}

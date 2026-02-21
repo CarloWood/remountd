@@ -165,7 +165,7 @@ class RemountdClient final : public SocketClient
     if (message == "list")
     {
       std::string const reply = Application::instance().format_allowed_mount_points(false);
-      send_text_to_client(fd(), reply);
+      send_text_to_socket(fd(), reply);
       return true;
     }
 
@@ -181,7 +181,7 @@ class RemountdClient final : public SocketClient
 
     if (tokens.size() != 3)
     {
-      send_text_to_client(fd(), "ERROR: invalid command format.\n");
+      send_text_to_socket(fd(), "ERROR: invalid command format.\n");
       return true;
     }
 
@@ -189,28 +189,25 @@ class RemountdClient final : public SocketClient
     std::optional<std::filesystem::path> const path = find_allowed_path(name);
     if (!path.has_value())
     {
-      send_text_to_client(
-          fd(),
-          "ERROR: " + std::string(name) + " is not an allowed identifier in " +
-          Application::instance().config_path().native() + ".\n");
+      send_text_to_socket(fd(), format_unknown_identifier_error(name));
       return true;
     }
 
     pid_t pid = 0;
     if (!parse_pid_token(tokens[2], &pid) || !is_running_process(pid))
     {
-      send_text_to_client(fd(), "ERROR: " + std::string(tokens[2]) + " is not a running process.\n");
+      send_text_to_socket(fd(), "ERROR: " + std::string(tokens[2]) + " is not a running process.\n");
       return true;
     }
 
     std::string const error_description = execute_remount_command(pid, is_ro, *path);
     if (!error_description.empty())
     {
-      send_text_to_client(fd(), "ERROR: " + error_description + "\n");
+      send_text_to_socket(fd(), "ERROR: " + error_description + "\n");
       return true;
     }
 
-    send_text_to_client(fd(), "OK\n");
+    send_text_to_socket(fd(), "OK\n");
     return true;
   }
 };

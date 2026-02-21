@@ -44,7 +44,10 @@ ScopedFd connect_unix_socket(std::filesystem::path const& socket_fs_path)
   addr.sun_path[socket_native_path.size()] = '\0';
 
   if (connect(fd.get(), reinterpret_cast<sockaddr const*>(&addr), sizeof(addr)) != 0)
-    throw std::system_error(errno, std::generic_category(), "connect('" + socket_native_path + "') failed");
+    if (errno == ENOENT)
+      throw_error(errc::no_such_socket, "Failed to connect to '" + socket_native_path + "'. Is the remountd running?");
+    else
+      throw std::system_error(errno, std::generic_category(), "connect('" + socket_native_path + "') failed");
 
   return fd;
 }
@@ -117,7 +120,7 @@ bool RemountCtl::parse_command_line_parameter(std::string_view arg, int /*argc*/
 
 void RemountCtl::print_usage_extra(std::ostream& os) const
 {
-  os << " <command...>";
+  os << " rw|ro <name>";
 }
 
 void RemountCtl::mainloop()
@@ -129,6 +132,7 @@ void RemountCtl::mainloop()
   if (positional_args_.empty())
   {
     std::cerr << "ERROR: missing command.\n";
+    print_usage();
     exit_code_ = 1;
     return;
   }
@@ -163,7 +167,7 @@ void RemountCtl::mainloop()
   if (reply == "OK\n")
     return;
 
-  std::cerr << reply;
+  std::cerr << "remountd: " << reply;
   exit_code_ = 1;
 }
 

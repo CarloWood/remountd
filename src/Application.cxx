@@ -69,9 +69,9 @@ Application::~Application()
   s_instance_ = nullptr;
 }
 
-void Application::print_usage(char const* argv0) const
+void Application::print_usage() const
 {
-  std::cerr << "Usage: " << argv0 << " [--help] [--version] [--list] [--config <path>] [--socket <path>]";
+  std::cerr << "Usage: " << utf8_to_string(application_info_.application_name()) << " [--help] [--version] [--list] [--config <path>] [--socket <path>]";
   print_usage_extra(std::cerr);
   std::cerr << "\n";
 }
@@ -107,7 +107,7 @@ void Application::parse_command_line_parameters(int argc, char* argv[])
     std::string_view const arg(argv[i]);
     if (arg == "--help" || arg == "-h")
     {
-      print_usage(argv[0]);
+      print_usage();
       throw_error(errc::no_error, "help requested");
     }
 

@@ -13,6 +13,7 @@ enum class errc
   missing_option_value,
   unknown_argument,
   config_open_failed,
+  no_such_socket,
   config_socket_missing,
   config_socket_empty,
   socket_path_too_long,

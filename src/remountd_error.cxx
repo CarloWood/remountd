@@ -26,6 +26,8 @@ struct remountd_error_category final : std::error_category
         return "unknown argument";
       case remountd::errc::config_open_failed:
         return "config open failed";
+      case remountd::errc::no_such_socket:
+        return "no such socket";
       case remountd::errc::config_socket_missing:
         return "config socket key missing";
       case remountd::errc::config_socket_empty:

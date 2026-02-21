@@ -52,9 +52,6 @@ class Application
   // Parse common command line parameters and delegate unknown options to derived class.
   void parse_command_line_parameters(int argc, char* argv[]);
 
-  // Print common usage text and derived-class usage suffix.
-  void print_usage(char const* argv0) const;
-
   // Print application name and decoded version.
   void print_version() const;
 
@@ -98,6 +95,9 @@ class Application
 
   // Parse CLI, initialize metadata, create termination pipe, and install signals.
   void initialize(int argc = 0, char** argv = nullptr);
+
+  // Print common usage text and derived-class usage suffix.
+  void print_usage() const;
 
   // Run the application mainloop until it returns.
   void run();

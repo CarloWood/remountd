@@ -2,6 +2,7 @@
 
 LIBDIR ?= /usr/lib
 BINDIR ?= /usr/sbin
+BUILDDIR ?= build
 
 # Define the destination directories for clarity.
 DEST_CONF_DIR = $(DESTDIR)/etc/remountd
@@ -33,17 +34,17 @@ install_configs:
 
 install: install_configs
 	install --directory $(DEST_CONF_DIR) $(DESTDIR)$(BINDIR) #$(DEST_DATADIR)
-	install --owner=root --group=root --mode=644 services/remountd@.service $(DESTDIR)$(LIBDIR)/systemd/system/
+	install --owner=root --group=root --mode=644 services/remountd.service $(DESTDIR)$(LIBDIR)/systemd/system/
 	install --owner=root --group=root --mode=644 services/remountd.socket $(DESTDIR)$(LIBDIR)/systemd/system/
 #	install --owner=root --group=root --mode=644 configs/lo.sh $(DEST_DATADIR)/
-	install --owner=root --group=root --mode=755 build/src/remountd $(DESTDIR)$(BINDIR)
-	install --owner=root --group=root --mode=755 build/src/remountctl $(DESTDIR)$(BINDIR)
+	install --owner=root --group=root --mode=755 $(BUILDDIR)/src/remountd $(DESTDIR)$(BINDIR)
+	install --owner=root --group=root --mode=755 $(BUILDDIR)/src/remountctl $(DESTDIR)$(BINDIR)
 
 uninstall:
 	systemctl disable --now "remountd.socket" || true
-	systemctl disable --now "remountd@.service" || true
+	systemctl disable --now "remountd.service" || true
 
-	rm -f $(DESTDIR)$(LIBDIR)/systemd/system/remountd@.service
+	rm -f $(DESTDIR)$(LIBDIR)/systemd/system/remountd.service
 	rm -f $(DESTDIR)$(LIBDIR)/systemd/system/remountd.socket
 #	rm -f $(DEST_DATADIR)/lo.sh
 	rm -f $(DESTDIR)$(BINDIR)/remountd

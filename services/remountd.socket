@@ -2,12 +2,11 @@
 Description=remountd control socket
 
 [Socket]
-ListenStream=/run/remountd.sock
+ListenStream=/run/remountd/remountd.sock
 SocketUser=root
-SocketGroup=mountd
+SocketGroup=remountd
 SocketMode=0660
-Accept=yes
+Accept=no
 
 [Install]
 WantedBy=sockets.target
-

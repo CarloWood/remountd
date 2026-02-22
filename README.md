@@ -21,7 +21,7 @@ Typical use-case: allow scripts running inside a sandbox (e.g. bubblewrap with
 
 ## How it works
 
-- `remountctl` connects to `/run/remountd.sock` and sends a simple command:
+- `remountctl` connects to `/run/remountd/remountd.sock` and sends a simple command:
   - `ro <name> <pid>` or `rw <name> <pid>` (remountctl appends its PID automatically)
 - `remountd` validates:
   - The caller (via UNIX peer credentials).
@@ -63,7 +63,7 @@ a mount-namespace PID).
 Example (illustrative):
 ```yaml
 # /etc/remountd/config.yaml
-socket: /run/remountd.sock
+socket: /run/remountd/remountd.sock
 
 allow:
   codex:
@@ -93,25 +93,23 @@ This creates the `remountd` group if it does not already exist.
 Description=remountd control socket
 
 [Socket]
-ListenStream=/run/remountd.sock
+ListenStream=/run/remountd/remountd.sock
 SocketUser=root
 SocketGroup=remountd
 SocketMode=0660
-Accept=yes
+Accept=no
 
 [Install]
 WantedBy=sockets.target
 ```
 
-`/etc/systemd/system/remountd@.service`
+`/etc/systemd/system/remountd.service`
 ```ini
 [Unit]
 Description=remountd request handler
 
 [Service]
-ExecStart=/usr/bin/remountd --inetd
-StandardInput=socket
-StandardOutput=socket
+ExecStart=/usr/bin/remountd
 StandardError=journal
 
 User=root
@@ -140,7 +138,7 @@ sudo systemctl enable --now remountd.socket
 
 Then add allowed users to the socket group (example group `codex`):
 ```sh
-sudo usermod -aG mountd <your-user>
+sudo usermod -aG remountd <your-user>
 ```
 
 Log out/in for group membership to take effect.

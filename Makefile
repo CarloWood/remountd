@@ -2,6 +2,7 @@
 
 LIBDIR ?= /usr/lib
 BINDIR ?= /usr/sbin
+RUNDIR ?= /run/remountd
 BUILDDIR ?= build
 
 # Define the destination directories for clarity.
@@ -33,7 +34,7 @@ install_configs:
 	' _ {} "$(DEST_CONF_DIR)" \; # Pass $(DEST_CONF_DIR) as the second argument
 
 install: install_configs
-	install --directory $(DEST_CONF_DIR) $(DESTDIR)$(BINDIR) #$(DEST_DATADIR)
+	install --directory $(DEST_CONF_DIR) $(DESTDIR)$(BINDIR) $(DESTDIR)$(RUNDIR)
 	install --owner=root --group=root --mode=644 services/remountd.service $(DESTDIR)$(LIBDIR)/systemd/system/
 	install --owner=root --group=root --mode=644 services/remountd.socket $(DESTDIR)$(LIBDIR)/systemd/system/
 #	install --owner=root --group=root --mode=644 configs/lo.sh $(DEST_DATADIR)/
@@ -46,6 +47,8 @@ uninstall:
 
 	rm -f $(DESTDIR)$(LIBDIR)/systemd/system/remountd.service
 	rm -f $(DESTDIR)$(LIBDIR)/systemd/system/remountd.socket
+	rm -f $(DESTDIR)$(RUNDIR)/remountd.sock
+	rmdir $(DESTDIR)$(RUNDIR)
 #	rm -f $(DEST_DATADIR)/lo.sh
 	rm -f $(DESTDIR)$(BINDIR)/remountd
 	rm -f $(DESTDIR)$(BINDIR)/remountctl

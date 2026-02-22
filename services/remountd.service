@@ -2,9 +2,7 @@
 Description=remountd request handler
 
 [Service]
-ExecStart=/usr/bin/remountd --inetd
-StandardInput=socket
-StandardOutput=socket
+ExecStart=/usr/bin/remountd
 StandardError=journal
 
 User=root

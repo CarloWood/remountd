@@ -115,8 +115,8 @@ StandardError=journal
 User=root
 Group=root
 NoNewPrivileges=yes
-CapabilityBoundingSet=CAP_SYS_ADMIN
-AmbientCapabilities=CAP_SYS_ADMIN
+CapabilityBoundingSet=CAP_SYS_ADMIN CAP_SYS_PTRACE CAP_SYS_CHROOT
+AmbientCapabilities=
 
 PrivateTmp=yes
 ProtectSystem=strict

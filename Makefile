@@ -42,8 +42,8 @@ install: install_configs
 	install --owner=root --group=root --mode=755 $(BUILDDIR)/src/remountctl $(DESTDIR)$(BINDIR)
 
 uninstall:
-	systemctl disable --now "remountd.socket" || true
-	systemctl disable --now "remountd.service" || true
+	systemctl stop "remountd.socket" "remountd.service" || true
+	systemctl disable "remountd.socket" || true
 
 	rm -f $(DESTDIR)$(LIBDIR)/systemd/system/remountd.service
 	rm -f $(DESTDIR)$(LIBDIR)/systemd/system/remountd.socket

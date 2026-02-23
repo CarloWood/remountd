@@ -2,7 +2,7 @@
 Description=remountd request handler
 
 [Service]
-ExecStart=/usr/sbin/remountd
+ExecStart=@REMOUNTD_DAEMON_PATH@
 StandardError=journal
 
 User=root

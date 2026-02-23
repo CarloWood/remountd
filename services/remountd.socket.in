@@ -2,7 +2,7 @@
 Description=remountd control socket
 
 [Socket]
-ListenStream=/run/remountd/remountd.sock
+ListenStream=@REMOUNTD_SOCKET_PATH@
 SocketUser=root
 SocketGroup=remountd
 SocketMode=0660

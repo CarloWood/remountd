@@ -15,18 +15,24 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # Note: `DESTDIR` is honored by CMake's install target automatically. For
 # install-time scripts we explicitly prefix with $ENV{DESTDIR}.
 
-set(REMOUNTD_CONFDIR "/etc/remountd"
-  CACHE PATH "Configuration directory (installed configs are never overwritten).")
-set(REMOUNTD_SBINDIR "/usr/sbin"
-  CACHE PATH "Directory to install remountd (privileged daemon) into.")
-set(REMOUNTD_BINDIR "/usr/bin"
-  CACHE PATH "Directory to install remountctl (unprivileged client) into.")
+include(GNUInstallDirs)
+
+set(REMOUNTD_CONFDIR "${CMAKE_INSTALL_FULL_SYSCONFDIR}/remountd")
 set(REMOUNTD_RUNDIR "/run/remountd"
   CACHE PATH "Runtime directory (used by the systemd socket).")
-set(REMOUNTD_SYSTEMD_UNITDIR "/usr/lib/systemd/system"
+set(REMOUNTD_SYSTEMD_UNITDIR "${CMAKE_INSTALL_FULL_LIBDIR}/systemd/system"
   CACHE PATH "Directory to install systemd unit files into.")
-set(REMOUNTD_DATADIR "/usr/share/remountd"
-  CACHE PATH "Directory to install helper scripts into.")
+
+set(REMOUNTD_DAEMON_PATH "${CMAKE_INSTALL_FULL_SBINDIR}/remountd")
+set(REMOUNTD_SOCKET_PATH "${REMOUNTD_RUNDIR}/remountd.sock")
+
+set(_remountd_service_file "${CMAKE_CURRENT_BINARY_DIR}/remountd.service")
+configure_file("${CMAKE_SOURCE_DIR}/services/remountd.service.in"
+  "${_remountd_service_file}" @ONLY)
+
+set(_remountd_socket_file "${CMAKE_CURRENT_BINARY_DIR}/remountd.socket")
+configure_file("${CMAKE_SOURCE_DIR}/services/remountd.socket.in"
+  "${_remountd_socket_file}" @ONLY)
 
 set(_remountd_install_configs_script "${CMAKE_CURRENT_BINARY_DIR}/remountd_install_configs.cmake")
 configure_file("${CMAKE_SOURCE_DIR}/cmake/remountd_install_configs.cmake.in"
@@ -60,15 +66,15 @@ endif()
 add_subdirectory(src)
 
 install(TARGETS remountd
-  RUNTIME DESTINATION "${REMOUNTD_SBINDIR}")
+  RUNTIME DESTINATION "${CMAKE_INSTALL_SBINDIR}")
 
 install(TARGETS remountctl
-  RUNTIME DESTINATION "${REMOUNTD_BINDIR}")
+  RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
 
-install(FILES services/remountd.service services/remountd.socket
+install(FILES "${_remountd_service_file}" "${_remountd_socket_file}"
   DESTINATION "${REMOUNTD_SYSTEMD_UNITDIR}")
 
 install(PROGRAMS scripts/post-install.sh
-  DESTINATION "${REMOUNTD_DATADIR}")
+  DESTINATION "${CMAKE_INSTALL_DATADIR}/remountd")
 
 install(SCRIPT "${_remountd_install_configs_script}")

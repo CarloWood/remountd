@@ -20,6 +20,9 @@ file(REMOVE
   "${destdir}@REMOUNTD_SBINDIR@/remountd"
   "${destdir}@REMOUNTD_BINDIR@/remountctl")
 
+file(REMOVE
+  "${destdir}@REMOUNTD_DATADIR@/post-install.sh")
+
 set(run_dir "${destdir}@REMOUNTD_RUNDIR@")
 if(IS_DIRECTORY "${run_dir}")
   file(GLOB remaining "${run_dir}/*")

@@ -25,6 +25,8 @@ set(REMOUNTD_RUNDIR "/run/remountd"
   CACHE PATH "Runtime directory (used by the systemd socket).")
 set(REMOUNTD_SYSTEMD_UNITDIR "/usr/lib/systemd/system"
   CACHE PATH "Directory to install systemd unit files into.")
+set(REMOUNTD_DATADIR "/usr/share/remountd"
+  CACHE PATH "Directory to install helper scripts into.")
 
 set(_remountd_install_configs_script "${CMAKE_CURRENT_BINARY_DIR}/remountd_install_configs.cmake")
 configure_file("${CMAKE_SOURCE_DIR}/cmake/remountd_install_configs.cmake.in"
@@ -65,5 +67,8 @@ install(TARGETS remountctl
 
 install(FILES services/remountd.service services/remountd.socket
   DESTINATION "${REMOUNTD_SYSTEMD_UNITDIR}")
+
+install(PROGRAMS scripts/post-install.sh
+  DESTINATION "${REMOUNTD_DATADIR}")
 
 install(SCRIPT "${_remountd_install_configs_script}")

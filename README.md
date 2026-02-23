@@ -109,7 +109,7 @@ WantedBy=sockets.target
 Description=remountd request handler
 
 [Service]
-ExecStart=/usr/bin/remountd
+ExecStart=/usr/sbin/remountd
 StandardError=journal
 
 User=root

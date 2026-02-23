@@ -1,0 +1,70 @@
+set(destdir "$ENV{DESTDIR}")
+if(destdir STREQUAL "")
+  set(destdir "")
+endif()
+
+set(conf_dir "@REMOUNTD_CONFDIR@")
+set(conf_dir_staged "${destdir}${conf_dir}")
+set(run_dir_staged "${destdir}@REMOUNTD_RUNDIR@")
+
+file(MAKE_DIRECTORY "${conf_dir_staged}")
+file(MAKE_DIRECTORY "${run_dir_staged}")
+
+file(GLOB config_sources
+  "@CMAKE_SOURCE_DIR@/configs/*.conf"
+  "@CMAKE_SOURCE_DIR@/configs/*.yaml")
+
+foreach(src_file IN LISTS config_sources)
+  get_filename_component(filename "${src_file}" NAME)
+  set(dest_file "${conf_dir_staged}/${filename}")
+  if(EXISTS "${dest_file}")
+    set(new_file "${conf_dir_staged}/${filename}.new")
+    set(bak_file "${conf_dir_staged}/${filename}.new.bak")
+    if(EXISTS "${new_file}")
+      execute_process(
+        COMMAND "@CMAKE_COMMAND@" -E compare_files "${src_file}" "${new_file}"
+        RESULT_VARIABLE files_differ
+        OUTPUT_QUIET
+        ERROR_QUIET)
+      if(files_differ EQUAL 0)
+        message(STATUS "Skipping '${new_file}' (already up-to-date)")
+      else()
+        message(STATUS "Updating '${new_file}' (saving previous as '${bak_file}')")
+        if(EXISTS "${bak_file}")
+          file(REMOVE "${bak_file}")
+        endif()
+        file(RENAME "${new_file}" "${bak_file}")
+        file(INSTALL
+          DESTINATION "${conf_dir}"
+          TYPE FILE
+          FILES "${src_file}"
+          RENAME "${filename}.new"
+          FILE_PERMISSIONS
+            OWNER_READ OWNER_WRITE
+            GROUP_READ
+            WORLD_READ)
+      endif()
+    else()
+      message(STATUS "Installing '${src_file}' to '${new_file}' (config exists)")
+      file(INSTALL
+        DESTINATION "${conf_dir}"
+        TYPE FILE
+        FILES "${src_file}"
+        RENAME "${filename}.new"
+        FILE_PERMISSIONS
+          OWNER_READ OWNER_WRITE
+          GROUP_READ
+          WORLD_READ)
+    endif()
+  else()
+    message(STATUS "Installing '${src_file}' to '${dest_file}' (new)")
+    file(INSTALL
+      DESTINATION "${conf_dir}"
+      TYPE FILE
+      FILES "${src_file}"
+      FILE_PERMISSIONS
+        OWNER_READ OWNER_WRITE
+        GROUP_READ
+        WORLD_READ)
+  endif()
+endforeach()

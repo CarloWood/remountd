@@ -2,5 +2,5 @@
 socket: /run/remountd/remountd.sock
 
 allow:
-  codex:
-    path: /opt/ext4/nvme2/codex/workspace   # The workspace that Codex works in.
+  ai-cli:
+    path: /opt/ext4/nvme2/codex/workspace   # Prefix under which AI CLI may remount mount points.

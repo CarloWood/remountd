@@ -120,7 +120,7 @@ bool RemountCtl::parse_command_line_parameter(std::string_view arg, int /*argc*/
 
 void RemountCtl::print_usage_extra(std::ostream& os) const
 {
-  os << " rw|ro <name>";
+  os << " rw|ro <name> <path>";
 }
 
 void RemountCtl::mainloop()
@@ -129,7 +129,7 @@ void RemountCtl::mainloop()
 
   exit_code_ = 0;
 
-  if (positional_args_.size() != 2)
+  if (positional_args_.size() != 3)
   {
     std::cerr << "remountctl: invalid number of arguments.\n";
     print_usage();

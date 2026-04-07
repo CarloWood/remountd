@@ -19,7 +19,7 @@ https://aur.archlinux.org/packages/remountd
 
 ## Design goals
 
-- Only remount explicitly configured mount points (no arbitrary targets).
+- Only remount paths that stay under explicitly configured prefixes.
 - Keep the client unprivileged; perform remounts with elevated privileges.
 - Use a local UNIX domain socket owned by the remountd group (for write access).
 - Work with **systemd socket activation** (recommended), but can also run standalone.
@@ -29,11 +29,13 @@ https://aur.archlinux.org/packages/remountd
 ## How it works
 
 - `remountctl` connects to `/run/remountd/remountd.sock` and sends a simple command:
-  - `ro <name> <pid>` or `rw <name> <pid>` (remountctl appends its PID automatically,
+  - `ro <name> <path> <pid>` or `rw <name> <path> <pid>` (remountctl appends its PID automatically,
     which is used to determine the mount namespace).
-- `remountd` validates the requested `<name>` against an allowlist in the config.
-- `remountd` performs a remount of the corresponding mount point in the mount namespace
-  of <pid> by running:`nsenter -t <pid> -m -- mount -o remount,bind,ro|rw <path>`
+- `remountd` validates the requested `<name>` against an allowlist in the config,
+  joins the configured prefix with `<path>`, normalizes the result, and rejects it
+  if the normalized path no longer stays under the configured prefix.
+- `remountd` performs a remount of the resolved mount point in the mount namespace
+  of <pid> by running:`nsenter -t <pid> -m -- mount -o remount,bind,ro|rw <resolved-path>`
 
 ---
 
@@ -42,7 +44,7 @@ https://aur.archlinux.org/packages/remountd
 - The daemon runs with the minimum privileges required to remount in a different mount namespace (`CAP_SYS_ADMIN`, `CAP_SYS_PTRACE` and `CAP_SYS_CHROOT`).
 - The socket mode permissions restrict who can connect.
 - The protocol is intentionally tiny and strict.
-- Only preconfigured targets are allowed.
+- Only paths that resolve under preconfigured prefixes are allowed.
 
 ---
 
@@ -50,8 +52,8 @@ https://aur.archlinux.org/packages/remountd
 
 ### Toggle a target
 ```sh
-remountctl rw codex
-remountctl ro codex
+remountctl rw ai-cli /
+remountctl ro ai-cli /subdir/mountpoint
 ```
 
 ### List configured targets
@@ -62,8 +64,7 @@ remountctl --list
 ---
 
 ## Configuration
-`remountd` uses an allowlist mapping logical names to mount points (and
-a mount-namespace PID).
+`remountd` uses an allowlist mapping logical names to mount-point prefixes.
 
 Example (illustrative):
 ```yaml
@@ -71,9 +72,14 @@ Example (illustrative):
 socket: /run/remountd/remountd.sock
 
 allow:
-  codex:
-    path: /opt/ext4/nvme2/codex
+  ai-cli:
+    path: /opt/ext4/nvme2/codex/workspace
 ```
+
+The extra `<path>` argument must start with `/`. It is appended to the configured
+prefix after stripping its leading root, then normalized with `std::filesystem`.
+For example, `/bar/../foo` resolves to `/foo` under the configured prefix and is
+accepted, while anything that normalizes outside the configured prefix is rejected.
 
 ---
 

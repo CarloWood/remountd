@@ -15,7 +15,7 @@ class SocketServer;
 class SocketClient
 {
  private:
-  static constexpr std::size_t max_message_length_c = 64;     // Maximum number of non-newline characters per message.
+  static constexpr std::size_t max_message_length_c = 256;    // Maximum number of non-newline characters per message.
   SocketServer& socket_server_;                               // Owning socket server instance.
   ScopedFd fd_;                                               // Owned connected client socket.
   std::string partial_message_;                               // Bytes of the current not-yet-terminated message.

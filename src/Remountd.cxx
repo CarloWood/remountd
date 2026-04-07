@@ -51,6 +51,55 @@ bool is_running_process(pid_t pid)
   return errno == EPERM;
 }
 
+// Return true when `path` starts with `prefix` on path-component boundaries.
+bool path_has_prefix(std::filesystem::path const& path, std::filesystem::path const& prefix)
+{
+  auto path_iter = path.begin();
+  auto const path_end = path.end();
+  for (auto prefix_iter = prefix.begin(); prefix_iter != prefix.end(); ++prefix_iter, ++path_iter)
+  {
+    if (path_iter == path_end || *path_iter != *prefix_iter)
+      return false;
+  }
+
+  return true;
+}
+
+// Resolve the configured prefix and requested absolute path to one allowed path.
+std::optional<std::filesystem::path> resolve_allowed_path(std::string_view name, std::string_view requested_path, std::string* error_reply)
+{
+  std::optional<std::filesystem::path> const configured_path = find_allowed_path(name);
+  if (!configured_path.has_value())
+  {
+    *error_reply = format_unknown_identifier_error(name);
+    return std::nullopt;
+  }
+
+  if (requested_path.empty() || requested_path.front() != '/')
+  {
+    *error_reply = "ERROR: path must start with '/'.\n";
+    return std::nullopt;
+  }
+
+  std::filesystem::path const configured_prefix = configured_path->lexically_normal();
+  if (!configured_prefix.is_absolute())
+  {
+    *error_reply = "ERROR: configured path for '" + std::string(name) + "' is not absolute.\n";
+    return std::nullopt;
+  }
+
+  std::filesystem::path const requested_suffix{std::string(requested_path)};
+  std::filesystem::path const resolved_path = (configured_prefix / requested_suffix.relative_path()).lexically_normal();
+
+  if (!path_has_prefix(resolved_path, configured_prefix))
+  {
+    *error_reply = "ERROR: requested path escapes allowed prefix.\n";
+    return std::nullopt;
+  }
+
+  return resolved_path;
+}
+
 // Execute remount command in mount namespace of pid.
 // Returns empty string on success, otherwise a description.
 std::string execute_remount_command(pid_t pid, bool read_only, std::filesystem::path const& path)
@@ -179,24 +228,25 @@ class RemountdClient final : public SocketClient
     if (!is_ro && !is_rw)
       return false;
 
-    if (tokens.size() != 3)
+    if (tokens.size() != 4)
     {
       send_text_to_socket(fd(), "ERROR: invalid command format.\n");
       return true;
     }
 
     std::string_view const name = tokens[1];
-    std::optional<std::filesystem::path> const path = find_allowed_path(name);
+    std::string error_reply;
+    std::optional<std::filesystem::path> const path = resolve_allowed_path(name, tokens[2], &error_reply);
     if (!path.has_value())
     {
-      send_text_to_socket(fd(), format_unknown_identifier_error(name));
+      send_text_to_socket(fd(), error_reply);
       return true;
     }
 
     pid_t pid = 0;
-    if (!parse_pid_token(tokens[2], &pid) || !is_running_process(pid))
+    if (!parse_pid_token(tokens[3], &pid) || !is_running_process(pid))
     {
-      send_text_to_socket(fd(), "ERROR: " + std::string(tokens[2]) + " is not a running process.\n");
+      send_text_to_socket(fd(), "ERROR: " + std::string(tokens[3]) + " is not a running process.\n");
       return true;
     }
 
